@@ -5,13 +5,13 @@ from app.models.chat import ChatCreateRequest, ChatResponse, ChatContinueRequest
 from app.services.agent_service import AgentService, IAgentService
 from app.services.chat_service import ChatService, IChatService
 from app.services.llm_service import LlmService
-from app.services.agents.prompt_writer_agent_service import PromptWriterAgentService
+from app.services.agents.creator_agent import CreatorAgentService
 
 router = APIRouter(prefix="/agent", tags=["Agent Management"])
 
 def get_agent_service() -> IAgentService:
     llm_service = LlmService()
-    prompt_writer = PromptWriterAgentService(llm_service=llm_service)
+    prompt_writer = CreatorAgentService()
     return AgentService(llm_service=llm_service, prompt_writer_service=prompt_writer)
 
 @router.post("/", response_model=AgentResponse)
@@ -28,8 +28,13 @@ async def create_agent(
         raise HTTPException(status_code=400, detail=str(e))
 
 @router.put("/{agent_id}", response_model=AgentResponse)
-async def update_agent(agent_id: str, req: AgentUpdateRequest, service: IAgentService = Depends(get_agent_service)):
-    agent = await service.update_agent(agent_id, req)
+async def update_agent(
+    agent_id: str, 
+    req: AgentUpdateRequest, 
+    service: IAgentService = Depends(get_agent_service),
+    new_version: bool = True
+):
+    agent = await service.update_agent(agent_id, req, new_version=new_version)
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
     return agent

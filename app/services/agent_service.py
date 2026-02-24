@@ -6,14 +6,18 @@ from pydantic_ai import Agent
 from pydantic_ai.models.openrouter import OpenRouterModel
 from pydantic_ai.providers.openrouter import OpenRouterProvider
 
-from app.models.agent import AgentCreateRequest, AgentUpdateRequest, AgentResponse, AgentDocument
+from app.models.agent import (
+    AgentCreateRequest, AgentUpdateRequest, AgentResponse, AgentDocument,
+    parse_agent_id, format_agent_response
+)
 from app.services.llm_service import ILlmService
 from app.services.agents.prompt_writer_agent_service import IPromptWriterAgentService
+from app.services.agents.system_agents import SYSTEM_AGENTS
 from app.db import db
 
 class IAgentService(Protocol):
     async def create_agent(self, req: AgentCreateRequest) -> AgentResponse: ...
-    async def update_agent(self, agent_id: str, req: AgentUpdateRequest) -> Optional[AgentResponse]: ...
+    async def update_agent(self, agent_id: str, req: AgentUpdateRequest, new_version: bool = True) -> Optional[AgentResponse]: ...
     def get_agent(self, agent_id: str) -> Optional[AgentResponse]: ...
     def get_all_agents(self) -> List[AgentResponse]: ...
     def delete_agent(self, agent_id: str) -> bool: ...
@@ -21,33 +25,9 @@ class IAgentService(Protocol):
     def get_runnable_agent(self, agent_id: Optional[str] = None) -> Agent: ...
     async def generate_prompt_background(self, agent_id: str) -> None: ...
 
-def parse_agent_id(agent_id_str: str) -> tuple[str, Optional[int]]:
-    if "-v" in agent_id_str:
-        base, ver = agent_id_str.rsplit("-v", 1)
-        if ver.isdigit():
-            return base, int(ver)
-    return agent_id_str, None
+# Removed helper functions moved to models/agent.py
 
-def format_agent_response(doc: dict) -> AgentResponse:
-    base_id = doc.get("base_id") or str(doc["_id"])
-    version = doc.get("version", 1)
-    
-    formatted_id = f"{base_id}-v{version}" if version > 1 else base_id
-
-    return AgentResponse(
-        id=formatted_id,
-        base_id=base_id,
-        version=version,
-        name=doc["name"],
-        role=doc["role"],
-        goal=doc["goal"],
-        backstory=doc["backstory"],
-        system_prompt=doc.get("system_prompt"),
-        status=doc.get("status", "completed"),
-        llm_id=doc["llm_id"],
-        created_at=doc["created_at"],
-        updated_at=doc["updated_at"]
-    )
+# SYSTEM_AGENTS moved to app/services/agents/system_agents.py
 
 class AgentService(IAgentService):
     def __init__(self, llm_service: ILlmService, prompt_writer_service: IPromptWriterAgentService):
@@ -87,37 +67,60 @@ class AgentService(IAgentService):
             return db.get_agents_collection().find_one({"base_id": base_id}, sort=[("version", -1)])
 
     def get_agent(self, agent_id: str) -> Optional[AgentResponse]:
+        if agent_id in SYSTEM_AGENTS:
+            return SYSTEM_AGENTS[agent_id]
         doc = self._get_agent_doc(agent_id)
         if not doc:
             return None
         return format_agent_response(doc)
 
-    async def update_agent(self, agent_id: str, req: AgentUpdateRequest) -> Optional[AgentResponse]:
+    async def update_agent(self, agent_id: str, req: AgentUpdateRequest, new_version: bool = True) -> Optional[AgentResponse]:
         doc = self._get_agent_doc(agent_id)
         if not doc:
             return None
             
         base_id = doc["base_id"]
         latest_doc = db.get_agents_collection().find_one({"base_id": base_id}, sort=[("version", -1)])
-        new_version = latest_doc.get("version", 1) + 1
         
-        updated_data = {
-            "name": req.name if req.name is not None else latest_doc["name"],
-            "role": req.role if req.role is not None else latest_doc["role"],
-            "goal": req.goal if req.goal is not None else latest_doc["goal"],
-            "backstory": req.backstory if req.backstory is not None else latest_doc["backstory"],
-            "llm_id": req.llm_id if req.llm_id is not None else latest_doc["llm_id"],
-            "system_prompt": req.system_prompt if req.system_prompt is not None else latest_doc.get("system_prompt"),
-            "status": req.status if req.status is not None else latest_doc.get("status", "completed"),
-            "base_id": base_id,
-            "version": new_version,
-            "created_at": latest_doc.get("created_at", datetime.utcnow()),
-            "updated_at": datetime.utcnow()
-        }
-        
-        res = db.get_agents_collection().insert_one(updated_data)
-        updated_data["_id"] = res.inserted_id
-        return format_agent_response(updated_data)
+        if new_version:
+            new_version_num = latest_doc.get("version", 1) + 1
+            updated_data = {
+                "name": req.name if req.name is not None else latest_doc["name"],
+                "role": req.role if req.role is not None else latest_doc["role"],
+                "goal": req.goal if req.goal is not None else latest_doc["goal"],
+                "backstory": req.backstory if req.backstory is not None else latest_doc["backstory"],
+                "llm_id": req.llm_id if req.llm_id is not None else latest_doc["llm_id"],
+                "system_prompt": req.system_prompt if req.system_prompt is not None else latest_doc.get("system_prompt"),
+                "status": req.status if req.status is not None else latest_doc.get("status", "completed"),
+                "base_id": base_id,
+                "version": new_version_num,
+                "created_at": latest_doc.get("created_at", datetime.utcnow()),
+                "updated_at": datetime.utcnow()
+            }
+            
+            res = db.get_agents_collection().insert_one(updated_data)
+            updated_data["_id"] = res.inserted_id
+            return format_agent_response(updated_data)
+        else:
+            # Update the latest doc in place
+            update_fields = {}
+            if req.name is not None: update_fields["name"] = req.name
+            if req.role is not None: update_fields["role"] = req.role
+            if req.goal is not None: update_fields["goal"] = req.goal
+            if req.backstory is not None: update_fields["backstory"] = req.backstory
+            if req.llm_id is not None: update_fields["llm_id"] = req.llm_id
+            if req.system_prompt is not None: update_fields["system_prompt"] = req.system_prompt
+            if req.status is not None: update_fields["status"] = req.status
+            update_fields["updated_at"] = datetime.utcnow()
+            
+            db.get_agents_collection().update_one(
+                {"_id": latest_doc["_id"]},
+                {"$set": update_fields}
+            )
+            
+            # Fetch updated doc to return correctly
+            updated_doc = db.get_agents_collection().find_one({"_id": latest_doc["_id"]})
+            return format_agent_response(updated_doc)
 
     def get_all_agents(self) -> List[AgentResponse]:
         pipeline = [
@@ -127,8 +130,9 @@ class AgentService(IAgentService):
                 "doc": {"$first": "$$ROOT"}
             }}
         ]
-        latest_agents = db.get_agents_collection().aggregate(pipeline)
-        return [format_agent_response(a["doc"]) for a in latest_agents]
+        latest_agents = list(db.get_agents_collection().aggregate(pipeline))
+        db_agents = [format_agent_response(a["doc"]) for a in latest_agents]
+        return list(SYSTEM_AGENTS.values()) + db_agents
 
     def delete_agent(self, agent_id: str) -> bool:
         base_id, _ = parse_agent_id(agent_id)
@@ -189,6 +193,10 @@ class AgentService(IAgentService):
                 model=model,
                 system_prompt='You are a helpful and concise AI assistant.'
             )
+            
+        if agent_id == "agent-creator":
+            from app.services.agents.creator_agent import CreatorAgent
+            return CreatorAgent()
             
         doc = self._get_agent_doc(agent_id)
         if not doc:

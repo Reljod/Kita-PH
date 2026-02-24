@@ -4,13 +4,13 @@ from app.models.chat import ChatCreateRequest, ChatResponse, ChatContinueRequest
 from app.services.chat_service import ChatService, IChatService
 from app.services.agent_service import IAgentService, AgentService
 from app.services.llm_service import LlmService
-from app.services.agents.prompt_writer_agent_service import PromptWriterAgentService
+from app.services.agents.creator_agent import CreatorAgentService
 
 router = APIRouter(prefix="/chat", tags=["Chat"])
 
 def get_agent_service() -> IAgentService:
     llm_service = LlmService()
-    prompt_writer = PromptWriterAgentService(llm_service=llm_service)
+    prompt_writer = CreatorAgentService()
     return AgentService(llm_service=llm_service, prompt_writer_service=prompt_writer)
 
 def get_chat_service(agent_service: IAgentService = Depends(get_agent_service)) -> IChatService:
