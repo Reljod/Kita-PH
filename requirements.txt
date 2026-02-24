@@ -4,3 +4,5 @@ pymongo[srv]
 pydantic-ai
 python-dotenv
 httpx
+sentence-transformers
+torch

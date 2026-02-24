@@ -23,4 +23,8 @@ class Database:
     def get_chats_collection(cls) -> Collection:
         return cls.db["chats"]
 
+    @classmethod
+    def get_rag_collection(cls) -> Collection:
+        return cls.db["rag"]
+
 db = Database()

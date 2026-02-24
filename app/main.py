@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 import os
 
 from app.db import db
-from app.routes import chat
+from app.routes import chat, memory
 
 # Load environment variables, prioritizing .env.local if it exists
 load_dotenv(".env.local")
@@ -27,6 +27,7 @@ app = FastAPI(
 
 # Include Routers
 app.include_router(chat.router)
+app.include_router(memory.router)
 
 @app.get("/")
 def root():
