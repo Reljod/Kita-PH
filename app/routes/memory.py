@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, status
+from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, status, Query
 from typing import List
 from app.models.rag import RagCreateRequest, RagResponse, RagUpdateRequest
 from app.services.rag_service import MongoVectorDbRagService, IRagService
@@ -25,6 +25,17 @@ async def create_rag(
 @router.get("", response_model=List[RagResponse])
 async def get_all_rags(rag_service: IRagService = Depends(get_rag_service)):
     return rag_service.get_all_rags()
+
+@router.get("/search", response_model=List[RagResponse])
+async def search_memory(
+    query: str = Query(..., description="The search query to find relevant information in memory."), 
+    limit: int = Query(5, description="The maximum number of results to return."), 
+    rag_service: IRagService = Depends(get_rag_service)
+):
+    try:
+        return await rag_service.search(query, limit=limit)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error searching memory: {str(e)}")
 
 @router.get("/{rag_id}", response_model=RagResponse)
 async def get_rag(rag_id: str, rag_service: IRagService = Depends(get_rag_service)):

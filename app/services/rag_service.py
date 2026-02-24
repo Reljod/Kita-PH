@@ -19,6 +19,8 @@ class IRagService(Protocol):
         ...
     async def update_embedding(self, rag_id: str):
         ...
+    async def search(self, query: str, limit: int = 5) -> List[RagResponse]:
+        ...
 
 def format_rag_response(doc: Dict[str, Any]) -> RagResponse:
     return RagResponse(
@@ -133,3 +135,31 @@ class MongoVectorDbRagService(IRagService):
                 )
             except:
                 pass
+
+    async def search(self, query: str, limit: int = 5) -> List[RagResponse]:
+        model = self.get_model()
+        # Run embedding in a thread pool since it's CPU bound
+        loop = asyncio.get_event_loop()
+        query_embedding = await loop.run_in_executor(None, model.encode, query)
+        
+        # Atlas Vector Search
+        # Note: This requires a vector index named 'vector_index' on the collection
+        pipeline = [
+            {
+                "$vectorSearch": {
+                    "index": "rag_index",
+                    "path": "embedding",
+                    "queryVector": query_embedding.tolist(),
+                    "numCandidates": limit * 10,
+                    "limit": limit
+                }
+            }
+        ]
+        
+        try:
+            docs = list(db.get_rag_collection().aggregate(pipeline))
+            return [format_rag_response(d) for d in docs]
+        except Exception as e:
+            print(f"Error during vector search: {e}")
+            # Fallback to simple text search or returning empty list if vector search index is not set up
+            return []

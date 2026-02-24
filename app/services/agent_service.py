@@ -13,6 +13,8 @@ from app.models.agent import (
 from app.services.llm_service import ILlmService
 from app.services.agents.creator_agent import IPromptWriterAgentService
 from app.services.agents.system_agents import SYSTEM_AGENTS
+from app.services.agents.system_prompt import get_full_instructions
+from app.services.tools.memory_tools import memory_toolset
 from app.db import db
 
 class IAgentService(Protocol):
@@ -181,7 +183,7 @@ class AgentService(IAgentService):
 
     def get_runnable_agent(self, agent_id: Optional[str] = None) -> Agent:
         if not agent_id:
-            model_name = os.getenv("LLM_MODEL", "meta-llama/llama-3.1-8b-instruct") # OpenRouter model name
+            model_name = os.getenv("LLM_MODEL", "x-ai/grok-4.1-fast") # OpenRouter model name
             api_key = os.getenv("OPENROUTER_API_KEY", "")
 
             model = OpenRouterModel(
@@ -189,9 +191,11 @@ class AgentService(IAgentService):
                 provider=OpenRouterProvider(api_key=api_key),
             )
             
+            instructions = get_full_instructions()
             return Agent(
                 model=model,
-                system_prompt='You are a helpful and concise AI assistant.'
+                instructions=instructions,
+                toolsets=[memory_toolset]
             )
             
         if agent_id == "agent-creator":
@@ -212,7 +216,11 @@ class AgentService(IAgentService):
             provider=OpenRouterProvider(api_key=api_key),
         )
         
+        db_instructions = doc.get("system_prompt")
+        full_instructions = get_full_instructions(db_instructions)
+        
         return Agent(
             model=model,
-            system_prompt=doc.get("system_prompt", "You are a helpful and concise AI assistant.")
+            instructions=full_instructions,
+            toolsets=[memory_toolset]
         )
