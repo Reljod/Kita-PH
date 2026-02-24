@@ -13,8 +13,8 @@ SYSTEM_AGENTS = {
         backstory="You are an expert AI Agent Creator. Your role is to design and formulate specialized AI agents based on user requests. You create agents of different roles, goals, and backstories.",
         system_prompt="Gather details about a new agent and use the creator tool.",
         status="completed",
-        llm_id=os.getenv("LLM_MODEL", "meta-llama/llama-3.1-8b-instruct"),
-        created_at=datetime(2024, 1, 1),
-        updated_at=datetime(2024, 1, 1)
+        llm_id=os.getenv("LLM_MODEL", "x-ai/grok-4.1-fast"),
+        created_at=datetime(2026, 2, 25),
+        updated_at=datetime(2026, 2, 25)
     )
 }
