@@ -1,11 +1,15 @@
+from typing import Protocol
 from pydantic_ai import ToolOutput
 import os
 from pydantic_ai import Agent
 from pydantic_ai.models.openrouter import OpenRouterModel
 from pydantic_ai.providers.openrouter import OpenRouterProvider
 
-from app.services.tools.agent_creation_tools import creator_toolset, create_agent, check_agent_exists, update_agent
-from app.services.agents.prompt_writer_agent_service import IPromptWriterAgentService
+from app.services.tools.agent_creation_tools import creator_toolset
+
+class IPromptWriterAgentService(Protocol):
+    async def generate_prompt(self, role: str, goal: str, backstory: str, llm_id: str) -> str:
+        ...
 
 class CreatorAgent(Agent):
     def __init__(self):

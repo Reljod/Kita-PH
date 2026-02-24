@@ -11,7 +11,7 @@ from app.models.agent import (
     parse_agent_id, format_agent_response
 )
 from app.services.llm_service import ILlmService
-from app.services.agents.prompt_writer_agent_service import IPromptWriterAgentService
+from app.services.agents.creator_agent import IPromptWriterAgentService
 from app.services.agents.system_agents import SYSTEM_AGENTS
 from app.db import db
 
