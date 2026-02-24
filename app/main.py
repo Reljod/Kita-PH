@@ -2,6 +2,8 @@ from fastapi import FastAPI
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 import os
+from langsmith.integrations.otel import configure
+from pydantic_ai import Agent
 
 from app.db import db
 from app.routes import chat, memory
@@ -9,6 +11,12 @@ from app.routes import chat, memory
 # Load environment variables, prioritizing .env.local if it exists
 load_dotenv(".env.local")
 load_dotenv()
+
+# Configure LangSmith tracing
+configure(project_name=os.getenv("LANGSMITH_PROJECT", "kita_ph"))
+
+# Instrument all PydanticAI agents
+Agent.instrument_all()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
