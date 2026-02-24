@@ -31,12 +31,28 @@ async def create_agent(
 async def update_agent(
     agent_id: str, 
     req: AgentUpdateRequest, 
+    background_tasks: BackgroundTasks,
     service: IAgentService = Depends(get_agent_service),
     new_version: bool = True
 ):
+    # If core fields are updated, we should regenerate the prompt
+    needs_regeneration = any([
+        req.role is not None, 
+        req.goal is not None, 
+        req.backstory is not None,
+        req.llm_id is not None
+    ])
+    
+    if needs_regeneration:
+        req.status = "pending"
+
     agent = await service.update_agent(agent_id, req, new_version=new_version)
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
+        
+    if needs_regeneration:
+        background_tasks.add_task(service.generate_prompt_background, agent.id)
+        
     return agent
 
 @router.get("/{agent_id}", response_model=AgentResponse)

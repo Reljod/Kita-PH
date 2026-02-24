@@ -13,13 +13,29 @@ async def create_agent(
     goal: Annotated[str, Field(description="The goal of the new agent.")],
     backstory: Annotated[str, Field(description="The backstory of the new agent.")],
     instructions: Annotated[str, Field(description="Instructions for the agent (this will be used as the system prompt).")],
-    llm_id: Annotated[str, Field(description="The ID of the LLM model to use for this agent.")]
+    llm_id: Annotated[Optional[str], Field(description="The ID of the LLM model to use for this agent. If not provided, it will be automatically selected based on environment defaults.")] = None
 ) -> str:
     """
     Finalizes the details of a new agent and saves it to the database.
     Call this tool when you have collected all the necessary information from the user 
     about the new agent they want to create.
     """
+    import os
+    from app.services.llm_service import LlmService
+    
+    if not llm_id or llm_id == "null":
+        llm_service = LlmService()
+        available_llms = llm_service.list_llms()
+        env_model = os.getenv("LLM_MODEL")
+        
+        # Try to match with LLM_MODEL from .env
+        match = next((l for l in available_llms if l.model == env_model), None)
+        if not match:
+            # Try to match with grok-4.1-fast fallback
+            match = next((l for l in available_llms if l.model == "x-ai/grok-4.1-fast"), None)
+            
+        llm_id = match.id if match else ""
+
     new_agent = AgentDocument(
         name=name,
         role=role,

@@ -51,9 +51,7 @@ class CreatorAgentService(IPromptWriterAgentService):
         )
         
         result = await agent.run(user_prompt)
-        # The CreatorAgent doesn't have a structured output type like PromptWriterAgentService, 
-        # so we take the raw data result.
-        if not result.data:
+        if not result.output:
             raise ValueError("Failed to generate prompt using CreatorAgent")
             
-        return str(result.data)
+        return str(result.output)
