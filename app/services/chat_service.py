@@ -1,0 +1,81 @@
+from bson import ObjectId
+from datetime import datetime
+from typing import List, Optional, Dict, Any
+from app.models.chat import ChatCreateRequest, ChatResponse, ChatContinueRequest, ChatDocument
+from pydantic_core import to_jsonable_python
+from pydantic_ai import ModelMessagesTypeAdapter
+from app.db import db
+from app.services.agent_service import get_agent
+
+def format_chat_response(doc: Dict[str, Any]) -> ChatResponse:
+    return ChatResponse(
+        id=str(doc["_id"]),
+        messages=doc["messages"],
+        created_at=doc["created_at"],
+        updated_at=doc["updated_at"]
+    )
+
+async def create_chat(req: ChatCreateRequest) -> ChatResponse:
+    agent = get_agent()
+    result = await agent.run(req.message)
+    
+    messages_dump = to_jsonable_python(result.all_messages())
+    
+    new_chat = ChatDocument(
+        messages=messages_dump
+    )
+    
+    doc = new_chat.model_dump()
+    res = db.get_chats_collection().insert_one(doc)
+    doc["_id"] = res.inserted_id
+    
+    return format_chat_response(doc)
+
+async def continue_chat(chat_id: str, req: ChatContinueRequest) -> Optional[ChatResponse]:
+    try:
+        obj_id = ObjectId(chat_id)
+    except Exception:
+        raise ValueError("Invalid chat ID")
+        
+    chat = db.get_chats_collection().find_one({"_id": obj_id})
+    if not chat:
+        return None
+        
+    agent = get_agent()
+    
+    # Load history
+    message_history = ModelMessagesTypeAdapter.validate_python(chat["messages"])
+    
+    result = await agent.run(req.message, message_history=message_history)
+    
+    # Dump new history
+    messages_dump = to_jsonable_python(result.all_messages())
+    
+    db.get_chats_collection().update_one(
+        {"_id": obj_id},
+        {
+            "$set": {
+                "messages": messages_dump,
+                "updated_at": datetime.utcnow()
+            }
+        }
+    )
+    
+    updated_chat = db.get_chats_collection().find_one({"_id": obj_id})
+    return format_chat_response(updated_chat)
+
+def get_chat(chat_id: str) -> Optional[ChatResponse]:
+    try:
+        obj_id = ObjectId(chat_id)
+    except Exception:
+        raise ValueError("Invalid chat ID")
+        
+    chat = db.get_chats_collection().find_one({"_id": obj_id})
+    if not chat:
+        return None
+        
+    return format_chat_response(chat)
+
+def get_all_chats() -> List[ChatResponse]:
+    chats = db.get_chats_collection().find().sort("updated_at", -1)
+    return [format_chat_response(c) for c in chats]
