@@ -13,6 +13,7 @@ class ChatCreateRequest(BaseModel):
 class ChatResponse(BaseModel):
     id: str
     messages: List[Any]
+    agent_id: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -22,5 +23,6 @@ class ChatContinueRequest(BaseModel):
 # Model to represent DB document
 class ChatDocument(BaseModel):
     messages: List[Any] = Field(default_factory=list)
+    agent_id: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
