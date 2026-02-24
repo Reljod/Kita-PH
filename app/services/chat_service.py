@@ -30,7 +30,7 @@ class ChatService(IChatService):
         self.agent_service = agent_service
 
     async def create_chat(self, req: ChatCreateRequest) -> ChatResponse:
-        agent = self.agent_service.get_agent()
+        agent = self.agent_service.get_runnable_agent()
         result = await agent.run(req.message)
         
         messages_dump = to_jsonable_python(result.all_messages())
@@ -55,7 +55,7 @@ class ChatService(IChatService):
         if not chat:
             return None
             
-        agent = self.agent_service.get_agent()
+        agent = self.agent_service.get_runnable_agent()
         
         # Load history
         message_history = ModelMessagesTypeAdapter.validate_python(chat["messages"])

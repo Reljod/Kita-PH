@@ -27,4 +27,12 @@ class Database:
     def get_rag_collection(cls) -> Collection:
         return cls.db["rag"]
 
+    @classmethod
+    def get_llms_collection(cls) -> Collection:
+        return cls.db["llms"]
+
+    @classmethod
+    def get_agents_collection(cls) -> Collection:
+        return cls.db["agents"]
+
 db = Database()
