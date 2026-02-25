@@ -6,7 +6,9 @@ from langsmith.integrations.otel import configure
 from pydantic_ai import Agent
 
 from app.db import db
-from app.routes import chat, memory, agent, llm
+from app.routes import chat, memory, agent, llm, auth, user, organization
+from app.security import get_current_user
+from fastapi import Depends
 
 # Load environment variables, prioritizing .env.local if it exists
 load_dotenv(".env.local")
@@ -34,10 +36,15 @@ app = FastAPI(
 )
 
 # Include Routers
-app.include_router(chat.router)
-app.include_router(memory.router)
-app.include_router(llm.router)
-app.include_router(agent.router)
+app.include_router(auth.router)
+app.include_router(user.router)
+app.include_router(organization.router)
+
+# Protected Routers
+app.include_router(chat.router, dependencies=[Depends(get_current_user)])
+app.include_router(memory.router, dependencies=[Depends(get_current_user)])
+app.include_router(llm.router, dependencies=[Depends(get_current_user)])
+app.include_router(agent.router, dependencies=[Depends(get_current_user)])
 
 @app.get("/")
 def root():

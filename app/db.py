@@ -35,4 +35,12 @@ class Database:
     def get_agents_collection(cls) -> Collection:
         return cls.db["agents"]
 
+    @classmethod
+    def get_users_collection(cls) -> Collection:
+        return cls.db["users"]
+
+    @classmethod
+    def get_organizations_collection(cls) -> Collection:
+        return cls.db["organizations"]
+
 db = Database()

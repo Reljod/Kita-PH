@@ -9,3 +9,5 @@ torch
 langsmith
 opentelemetry-sdk
 opentelemetry-exporter-otlp
+python-jose[cryptography]
+bcrypt
