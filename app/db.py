@@ -43,4 +43,8 @@ class Database:
     def get_organizations_collection(cls) -> Collection:
         return cls.db["organizations"]
 
+    @classmethod
+    def get_tokens_collection(cls) -> Collection:
+        return cls.db["tokens"]
+
 db = Database()

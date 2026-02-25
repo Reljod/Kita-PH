@@ -4,7 +4,7 @@ from app.models.auth import Token, RegisterRequest, LoginRequest
 from app.models.user import UserCreate
 from app.services.auth_service import AuthService
 from app.services.user_service import UserService
-from app.security import get_auth_service, get_user_service
+from app.security import get_auth_service, get_user_service, oauth2_scheme
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -48,9 +48,19 @@ async def refresh(
     refresh_token: str,
     auth_service: AuthService = Depends(get_auth_service)
 ):
-    # Simplified refresh logic
     token_data = auth_service.verify_token(refresh_token)
     if not token_data:
         raise HTTPException(status_code=401, detail="Invalid refresh token")
     
+    # Revoke old tokens
+    auth_service.revoke_token(refresh_token)
+    
     return auth_service.generate_tokens(token_data.user_id)
+
+@router.post("/logout")
+async def logout(
+    token: str = Depends(oauth2_scheme),
+    auth_service: AuthService = Depends(get_auth_service)
+):
+    auth_service.revoke_token(token)
+    return {"message": "Successfully logged out"}
