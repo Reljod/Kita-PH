@@ -4,7 +4,8 @@ from app.models.organization import (
     OrganizationResponse, OrgCreate, OrgUpdate, OrgMemberUpdate
 )
 from app.models.user import UserResponse
-from app.security import get_current_user
+from app.models.user import UserResponse
+from app.security import get_current_user, require_org_membership
 from app.services.organization_service import OrganizationService
 
 router = APIRouter(prefix="/org", tags=["org"])
@@ -31,22 +32,35 @@ async def get_my_organizations(
 async def get_organization(
     id: str,
     current_user: UserResponse = Depends(get_current_user),
-    org_service: OrganizationService = Depends(get_org_service)
+    org_service: OrganizationService = Depends(get_org_service),
+    authorized_org_id: str = Depends(require_org_membership)
 ):
-    org = org_service.get_org(id)
+    # Ensure the user is accessing the organization they are logged into
+    if id != authorized_org_id:
+        # Fallback check if it's an org_code
+        org = org_service.get_org_by_code(id)
+        if not org or org.id != authorized_org_id:
+             raise HTTPException(status_code=403, detail="Access denied to this organization")
+    
+    org = org_service.get_org(authorized_org_id)
     if not org:
         raise HTTPException(status_code=404, detail="Organization not found")
     return org
 
 @router.patch("/{id}", response_model=OrganizationResponse)
-async def update_organization_name(
+async def update_organization(
     id: str,
     org_in: OrgUpdate,
     current_user: UserResponse = Depends(get_current_user),
-    org_service: OrganizationService = Depends(get_org_service)
+    org_service: OrganizationService = Depends(get_org_service),
+    authorized_org_id: str = Depends(require_org_membership)
 ):
-    # Note: In a real app, check if user is admin of this org
-    org = org_service.update_org_name(id, org_in)
+    if id != authorized_org_id:
+        org = org_service.get_org_by_code(id)
+        if not org or org.id != authorized_org_id:
+             raise HTTPException(status_code=403, detail="Access denied to this organization")
+
+    org = org_service.update_org(authorized_org_id, org_in)
     if not org:
         raise HTTPException(status_code=404, detail="Organization not found")
     return org
@@ -56,9 +70,15 @@ async def add_or_update_member(
     id: str,
     member_in: OrgMemberUpdate,
     current_user: UserResponse = Depends(get_current_user),
-    org_service: OrganizationService = Depends(get_org_service)
+    org_service: OrganizationService = Depends(get_org_service),
+    authorized_org_id: str = Depends(require_org_membership)
 ):
-    org = org_service.add_or_update_member(id, member_in)
+    if id != authorized_org_id:
+        org = org_service.get_org_by_code(id)
+        if not org or org.id != authorized_org_id:
+             raise HTTPException(status_code=403, detail="Access denied to this organization")
+
+    org = org_service.add_or_update_member(authorized_org_id, member_in)
     if not org:
         raise HTTPException(status_code=404, detail="Organization not found")
     return org
@@ -68,9 +88,15 @@ async def revoke_member(
     id: str,
     user_id: str,
     current_user: UserResponse = Depends(get_current_user),
-    org_service: OrganizationService = Depends(get_org_service)
+    org_service: OrganizationService = Depends(get_org_service),
+    authorized_org_id: str = Depends(require_org_membership)
 ):
-    org = org_service.revoke_member(id, user_id)
+    if id != authorized_org_id:
+        org = org_service.get_org_by_code(id)
+        if not org or org.id != authorized_org_id:
+             raise HTTPException(status_code=403, detail="Access denied to this organization")
+
+    org = org_service.revoke_member(authorized_org_id, user_id)
     if not org:
         raise HTTPException(status_code=404, detail="Organization not found")
     return org

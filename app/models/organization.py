@@ -13,13 +13,16 @@ class OrgMember(BaseModel):
     role: OrgRole
 
 class OrganizationBase(BaseModel):
-    org_name: str
+    org_name: str = ""
+    org_code: str = ""
 
-class OrgCreate(OrganizationBase):
-    pass
+class OrgCreate(BaseModel):
+    org_name: str
+    org_code: str
 
 class OrgUpdate(BaseModel):
-    org_name: str
+    org_name: Optional[str] = None
+    org_code: Optional[str] = None
 
 class OrgMemberUpdate(BaseModel):
     user_id: str
@@ -27,9 +30,9 @@ class OrgMemberUpdate(BaseModel):
 
 class OrganizationResponse(OrganizationBase):
     id: str
-    org_members: List[OrgMember]
-    created_at: datetime
-    updated_at: datetime
+    org_members: List[OrgMember] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
 
 class OrganizationDocument(OrganizationBase):
     org_members: List[OrgMember] = Field(default_factory=list)

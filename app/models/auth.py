@@ -9,10 +9,13 @@ class Token(BaseModel):
 
 class TokenData(BaseModel):
     user_id: Optional[str] = None
+    org_id: Optional[str] = None
 
 class LoginRequest(BaseModel):
     email: str
     password: str
+    org_id: Optional[str] = None
+    org_code: Optional[str] = None
 
 class RegisterRequest(BaseModel):
     email: str

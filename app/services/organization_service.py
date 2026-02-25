@@ -14,6 +14,7 @@ class OrganizationService:
     def create_org(self, org_in: OrgCreate, creator_id: str) -> OrganizationResponse:
         org_doc = OrganizationDocument(
             org_name=org_in.org_name,
+            org_code=org_in.org_code,
             org_members=[OrgMember(user_id=creator_id, role=OrgRole.ADMIN)],
             created_at=datetime.utcnow(),
             updated_at=datetime.utcnow()
@@ -24,16 +25,51 @@ class OrganizationService:
         return OrganizationResponse(**org_dict)
 
     def get_org(self, org_id: str) -> Optional[OrganizationResponse]:
-        org = self.collection.find_one({"_id": ObjectId(org_id)})
+        if not org_id:
+            return None
+            
+        # Try finding by ObjectId first
+        org = None
+        try:
+            oid = ObjectId(org_id)
+            org = self.collection.find_one({"_id": oid})
+        except Exception:
+            pass
+            
+        # If not found by ObjectId, try finding by string ID
+        if not org:
+            org = self.collection.find_one({"_id": org_id})
+            
         if org:
             org["id"] = str(org["_id"])
             return OrganizationResponse(**org)
         return None
 
-    def update_org_name(self, org_id: str, org_in: OrgUpdate) -> Optional[OrganizationResponse]:
+    def get_org_by_code(self, org_code: str) -> Optional[OrganizationResponse]:
+        org = self.collection.find_one({"org_code": org_code})
+        if org:
+            org["id"] = str(org["_id"])
+            return OrganizationResponse(**org)
+        return None
+
+    def get_org_by_id_or_code(self, identifier: str) -> Optional[OrganizationResponse]:
+        # Try ID first
+        org = self.get_org(identifier)
+        if org:
+            return org
+        # Then try code
+        return self.get_org_by_code(identifier)
+
+    def update_org(self, org_id: str, org_in: OrgUpdate) -> Optional[OrganizationResponse]:
+        update_data = org_in.model_dump(exclude_unset=True)
+        if not update_data:
+            return self.get_org(org_id)
+            
+        update_data["updated_at"] = datetime.utcnow()
+        
         result = self.collection.find_one_and_update(
             {"_id": ObjectId(org_id)},
-            {"$set": {"org_name": org_in.org_name, "updated_at": datetime.utcnow()}},
+            {"$set": update_data},
             return_document=True
         )
         if result:

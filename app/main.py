@@ -7,7 +7,7 @@ from pydantic_ai import Agent
 
 from app.db import db
 from app.routes import chat, memory, agent, llm, auth, user, organization
-from app.security import get_current_user
+from app.security import require_org_membership
 from fastapi import Depends
 
 # Load environment variables, prioritizing .env.local if it exists
@@ -40,11 +40,12 @@ app.include_router(auth.router)
 app.include_router(user.router)
 app.include_router(organization.router)
 
-# Protected Routers
-app.include_router(chat.router, dependencies=[Depends(get_current_user)])
-app.include_router(memory.router, dependencies=[Depends(get_current_user)])
-app.include_router(llm.router, dependencies=[Depends(get_current_user)])
-app.include_router(agent.router, dependencies=[Depends(get_current_user)])
+# Protected Routers - Require Organization Membership
+protected_deps = [Depends(require_org_membership)]
+app.include_router(chat.router, dependencies=protected_deps)
+app.include_router(memory.router, dependencies=protected_deps)
+app.include_router(llm.router, dependencies=protected_deps)
+app.include_router(agent.router, dependencies=protected_deps)
 
 @app.get("/")
 def root():

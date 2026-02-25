@@ -32,6 +32,7 @@ class AuthService:
         try:
             payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
             user_id: str = payload.get("sub")
+            org_id: str = payload.get("org_id")
             if user_id is None:
                 return None
             
@@ -46,12 +47,16 @@ class AuthService:
             if not token_doc:
                 return None
 
-            return TokenData(user_id=user_id)
+            return TokenData(user_id=user_id, org_id=org_id)
         except JWTError:
             return None
 
-    def generate_tokens(self, user_id: str) -> Token:
-        access_token, expires_at = self.create_access_token(data={"sub": user_id})
+    def generate_tokens(self, user_id: str, org_id: Optional[str] = None) -> Token:
+        access_token_data = {"sub": user_id}
+        if org_id:
+            access_token_data["org_id"] = org_id
+            
+        access_token, expires_at = self.create_access_token(data=access_token_data)
         refresh_token = self.create_refresh_token(data={"sub": user_id})
         
         # Save tokens to database
