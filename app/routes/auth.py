@@ -38,12 +38,7 @@ async def login(
     user_service: UserService = Depends(get_user_service),
     org_service: OrganizationService = Depends(get_org_service)
 ):
-    if not org_id and not org_code:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Organization identification (org_id or org_code) is required"
-        )
-
+    # 1. Authenticate user
     user = user_service.get_user_by_email(form_data.username)
     if not user or not user_service.verify_password(form_data.password, user["password"]):
         raise HTTPException(
@@ -52,23 +47,42 @@ async def login(
             headers={"WWW-Authenticate": "Bearer"},
         )
     
-    resolved_org_id = org_id
-    if org_code:
-        org = org_service.get_org_by_code(org_code)
-        if not org:
-            raise HTTPException(status_code=404, detail=f"Organization code '{org_code}' not found")
-        resolved_org_id = org.id
+    user_id = str(user["_id"])
+    user_orgs = org_service.get_user_orgs(user_id)
     
-    # If org_id/org_code provided, verify user is a member
-    if resolved_org_id:
-        org = org_service.get_org(resolved_org_id)
-        if not org:
-            raise HTTPException(status_code=404, detail=f"Organization with ID '{resolved_org_id}' not found")
-        is_member = any(m.user_id == str(user["_id"]) for m in org.org_members)
+    resolved_org_id = None
+    
+    # 2. Handle Organization Identification
+    if org_id or org_code:
+        # Resolve target org_id
+        if org_code:
+            org = org_service.get_org_by_code(org_code)
+            if not org:
+                raise HTTPException(status_code=404, detail=f"Organization code '{org_code}' not found")
+            resolved_org_id = org.id
+        else:
+            resolved_org_id = org_id
+            
+        # Verify organization exists and user is a member
+        target_org = org_service.get_org(resolved_org_id)
+        if not target_org:
+            raise HTTPException(status_code=404, detail="Organization not found")
+            
+        is_member = any(m.user_id == user_id for m in target_org.org_members)
         if not is_member:
             raise HTTPException(status_code=403, detail="User is not a member of this organization")
+    else:
+        # No org identification provided
+        if user_orgs:
+            # User is in at least one org, so they MUST specify which one to log into
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Organization identification (org_id or org_code) is required"
+            )
+        # User is in NO orgs, allow login without resolved_org_id
+        resolved_org_id = None
 
-    return auth_service.generate_tokens(str(user["_id"]), resolved_org_id)
+    return auth_service.generate_tokens(user_id, resolved_org_id)
 
 @router.post("/refresh", response_model=Token)
 async def refresh(
