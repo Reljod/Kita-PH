@@ -2,11 +2,14 @@ from fastapi import APIRouter, HTTPException, Depends
 from typing import List
 from app.models.llm import LlmCreateRequest, LlmResponse
 from app.services.llm_service import LlmService, ILlmService
+from app.db import db, TenantCollection
+from app.security import get_current_org_id
 
 router = APIRouter(prefix="/llm", tags=["LLM Management"])
 
-def get_llm_service() -> ILlmService:
-    return LlmService()
+def get_llm_service(org_id: str = Depends(get_current_org_id)) -> ILlmService:
+    collection = TenantCollection(db.get_llms_collection(), org_id)
+    return LlmService(collection)
 
 @router.post("/", response_model=LlmResponse)
 def add_llm(req: LlmCreateRequest, service: ILlmService = Depends(get_llm_service)):

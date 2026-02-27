@@ -16,6 +16,7 @@ class LlmResponse(BaseModel):
     updated_at: datetime
 
 class LlmDocument(BaseModel):
+    org_id: Optional[str] = None
     name: str
     model: str
     provider: str = 'openrouter'

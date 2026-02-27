@@ -2,11 +2,14 @@ from pydantic_ai import FunctionToolset
 from pydantic import Field
 from typing import Annotated, List
 from app.services.rag_service import MongoVectorDbRagService
+from pydantic_ai import RunContext
+from app.db import db, TenantCollection
 
 memory_toolset = FunctionToolset()
 
 @memory_toolset.tool
 async def search_memory(
+    ctx: RunContext[dict],
     query: Annotated[str, Field(description="The search query to find relevant information in the memory.")],
     limit: Annotated[int, Field(description="The maximum number of results to return.")] = 5
 ) -> str:
@@ -14,7 +17,9 @@ async def search_memory(
     Searches the agent's memory (RAG) for relevant information based on the query.
     This uses MongoDB embeddings for vector search.
     """
-    service = MongoVectorDbRagService()
+    org_id = ctx.deps["org_id"]
+    collection = TenantCollection(db.get_rag_collection(), org_id)
+    service = MongoVectorDbRagService(collection)
     results = await service.search(query, limit=limit)
     
     if not results:

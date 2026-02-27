@@ -1,13 +1,15 @@
 from pydantic_ai import FunctionToolset
 from pydantic import Field
 from typing import Optional, Annotated
-from app.db import db
+from pydantic_ai import RunContext
+from app.db import db, TenantCollection
 from app.models.agent import AgentDocument, format_agent_response
 
 creator_toolset = FunctionToolset()
 
 @creator_toolset.tool
 async def create_agent(
+    ctx: RunContext[dict],
     name: Annotated[str, Field(description="The name of the new agent.")],
     role: Annotated[str, Field(description="The role assigned to the new agent.")],
     goal: Annotated[str, Field(description="The goal of the new agent.")],
@@ -22,9 +24,15 @@ async def create_agent(
     """
     import os
     from app.services.llm_service import LlmService
+    from app.services.agent_service import AgentService
+    from app.services.agents.creator_agent import CreatorAgentService
+    from app.models.agent import AgentCreateRequest, AgentUpdateRequest
+
+    org_id = ctx.deps["org_id"]
+    llm_service_coll = TenantCollection(db.get_llms_collection(), org_id)
+    llm_service = LlmService(llm_service_coll)
     
     if not llm_id or llm_id == "null":
-        llm_service = LlmService()
         available_llms = llm_service.list_llms()
         env_model = os.getenv("LLM_MODEL")
         
@@ -36,34 +44,35 @@ async def create_agent(
             
         llm_id = match.id if match else ""
 
-    new_agent = AgentDocument(
+    prompt_writer = CreatorAgentService(org_id)
+    agent_coll = TenantCollection(db.get_agents_collection(), org_id)
+    
+    agent_service = AgentService(
+        llm_service=llm_service, 
+        prompt_writer_service=prompt_writer, 
+        collection=agent_coll
+    )
+
+    req = AgentCreateRequest(
         name=name,
         role=role,
         goal=goal,
         backstory=backstory,
-        llm_id=llm_id,
+        llm_id=llm_id
+    )
+    agent = await agent_service.create_agent(req)
+    
+    update_req = AgentUpdateRequest(
         system_prompt=instructions,
-        status="completed",
-        version=1,
-        base_id=None
+        status="completed"
     )
+    updated_agent = await agent_service.update_agent(agent.id, update_req, new_version=False)
     
-    doc = new_agent.model_dump()
-    res = db.get_agents_collection().insert_one(doc)
-    
-    base_id_str = str(res.inserted_id)
-    db.get_agents_collection().update_one(
-        {"_id": res.inserted_id},
-        {"$set": {"base_id": base_id_str}}
-    )
-    doc["_id"] = res.inserted_id
-    doc["base_id"] = base_id_str
-    
-    response = format_agent_response(doc)
-    return f"Successfully created agent '{name}' with ID: {response.id}"
+    return f"Successfully created agent '{name}' with ID: {updated_agent.id}"
 
 @creator_toolset.tool
 async def check_agent_exists(
+    ctx: RunContext[dict],
     agent_id: Annotated[str, Field(description="The ID of the agent to check (e.g., '67bc...-v1' or '67bc...')")]
 ) -> str:
     """
@@ -76,7 +85,9 @@ async def check_agent_exists(
     if version:
         query["version"] = version
         
-    doc = db.get_agents_collection().find_one(query)
+    org_id = ctx.deps["org_id"]
+    collection = TenantCollection(db.get_agents_collection(), org_id)
+    doc = collection.find_one(query)
     if not doc:
         return f"Agent with ID '{agent_id}' does not exist."
     
@@ -91,6 +102,7 @@ async def check_agent_exists(
 
 @creator_toolset.tool
 async def update_agent(
+    ctx: RunContext[dict],
     agent_id: Annotated[str, Field(description="The ID of the agent to update.")],
     name: Annotated[Optional[str], Field(description="The new name of the agent.")] = None,
     role: Annotated[Optional[str], Field(description="The new role of the agent.")] = None,
@@ -109,10 +121,12 @@ async def update_agent(
     from app.services.agent_service import AgentService
     from app.services.agents.creator_agent import CreatorAgentService
     
-    # We use AgentService to handle the versioning and update logic
-    llm_service = LlmService()
-    prompt_writer = CreatorAgentService()
-    service = AgentService(llm_service=llm_service, prompt_writer_service=prompt_writer)
+    org_id = ctx.deps["org_id"]
+    llm_service_coll = TenantCollection(db.get_llms_collection(), org_id)
+    llm_service = LlmService(llm_service_coll)
+    prompt_writer = CreatorAgentService(org_id)
+    agent_coll = TenantCollection(db.get_agents_collection(), org_id)
+    service = AgentService(llm_service=llm_service, prompt_writer_service=prompt_writer, collection=agent_coll)
     
     update_req = AgentUpdateRequest(
         name=name,

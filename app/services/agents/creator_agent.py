@@ -43,6 +43,9 @@ class CreatorAgent(Agent):
         )
 
 class CreatorAgentService(IPromptWriterAgentService):
+    def __init__(self, org_id: str):
+        self.org_id = org_id
+
     async def generate_prompt(self, role: str, goal: str, backstory: str, llm_id: str) -> str:
         """
         Uses the CreatorAgent logic to generate a high-quality system prompt.
@@ -56,7 +59,7 @@ class CreatorAgentService(IPromptWriterAgentService):
             "Return ONLY the system prompt text. Do not include introductory phrases or formatting like 'Here is the prompt:'."
         )
         
-        result = await agent.run(user_prompt)
+        result = await agent.run(user_prompt, deps={"org_id": self.org_id})
         if not result.output:
             raise ValueError("Failed to generate prompt using CreatorAgent")
             

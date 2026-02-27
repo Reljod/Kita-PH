@@ -5,16 +5,24 @@ from app.services.chat_service import ChatService, IChatService
 from app.services.agent_service import IAgentService, AgentService
 from app.services.llm_service import LlmService
 from app.services.agents.creator_agent import CreatorAgentService
+from app.db import db, TenantCollection
+from app.security import get_current_org_id
 
 router = APIRouter(prefix="/chat", tags=["Chat"])
 
-def get_agent_service() -> IAgentService:
-    llm_service = LlmService()
-    prompt_writer = CreatorAgentService()
-    return AgentService(llm_service=llm_service, prompt_writer_service=prompt_writer)
+def get_agent_service(org_id: str = Depends(get_current_org_id)) -> IAgentService:
+    llm_service_coll = TenantCollection(db.get_llms_collection(), org_id)
+    llm_service = LlmService(llm_service_coll)
+    prompt_writer = CreatorAgentService(org_id)
+    collection = TenantCollection(db.get_agents_collection(), org_id)
+    return AgentService(llm_service=llm_service, prompt_writer_service=prompt_writer, collection=collection)
 
-def get_chat_service(agent_service: IAgentService = Depends(get_agent_service)) -> IChatService:
-    return ChatService(agent_service)
+def get_chat_service(
+    org_id: str = Depends(get_current_org_id),
+    agent_service: IAgentService = Depends(get_agent_service)
+) -> IChatService:
+    collection = TenantCollection(db.get_chats_collection(), org_id)
+    return ChatService(agent_service, collection)
 
 @router.post("", response_model=ChatResponse)
 async def create_chat(

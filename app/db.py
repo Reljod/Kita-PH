@@ -48,3 +48,64 @@ class Database:
         return cls.db["tokens"]
 
 db = Database()
+
+from typing import Mapping, Any, Optional
+
+class TenantCollection:
+    def __init__(self, collection: Collection, org_id: str):
+        """
+        Wraps a PyMongo Collection to auto-inject org_id in queries and insertions.
+        """
+        self._collection = collection
+        self.org_id = org_id
+
+    def _inject(self, filter_query: Optional[Mapping[str, Any]]) -> dict:
+        """Helper to inject the org_id into the query filter."""
+        query = dict(filter_query) if filter_query else {}
+        query["org_id"] = self.org_id
+        return query
+
+    def find(self, filter=None, *args, **kwargs):
+        return self._collection.find(self._inject(filter), *args, **kwargs)
+
+    def find_one(self, filter=None, *args, **kwargs):
+        return self._collection.find_one(self._inject(filter), *args, **kwargs)
+
+    def insert_one(self, document, *args, **kwargs):
+        document["org_id"] = self.org_id
+        return self._collection.insert_one(document, *args, **kwargs)
+
+    def insert_many(self, documents, *args, **kwargs):
+        for doc in documents:
+            doc["org_id"] = self.org_id
+        return self._collection.insert_many(documents, *args, **kwargs)
+
+    def update_one(self, filter, update, **kwargs):
+        return self._collection.update_one(self._inject(filter), update, **kwargs)
+
+    def update_many(self, filter, update, **kwargs):
+        return self._collection.update_many(self._inject(filter), update, **kwargs)
+
+    def delete_one(self, filter, **kwargs):
+        return self._collection.delete_one(self._inject(filter), **kwargs)
+
+    def delete_many(self, filter, **kwargs):
+        return self._collection.delete_many(self._inject(filter), **kwargs)
+
+    def count_documents(self, filter, **kwargs):
+        return self._collection.count_documents(self._inject(filter), **kwargs)
+
+    def aggregate(self, pipeline, *args, **kwargs):
+        """Inject an org_id match into the aggregation pipeline."""
+        pipeline = list(pipeline) if pipeline else []
+        
+        if pipeline and "$match" in pipeline[0]:
+            pipeline[0]["$match"]["org_id"] = self.org_id
+        else:
+            pipeline.insert(0, {"$match": {"org_id": self.org_id}})
+            
+        return self._collection.aggregate(pipeline, *args, **kwargs)
+
+    def __getattr__(self, name):
+        """Delegate all other attributes."""
+        return getattr(self._collection, name)

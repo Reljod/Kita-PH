@@ -40,6 +40,7 @@ class AgentResponse(BaseModel):
     updated_at: datetime
 
 class AgentDocument(BaseModel):
+    org_id: Optional[str] = None
     base_id: Optional[str] = None
     version: int = 1
     name: str

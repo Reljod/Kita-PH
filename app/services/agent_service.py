@@ -15,7 +15,7 @@ from app.services.agents.creator_agent import IPromptWriterAgentService
 from app.services.agents.system_agents import SYSTEM_AGENTS
 from app.services.agents.system_prompt import get_full_instructions
 from app.services.tools.memory_tools import memory_toolset
-from app.db import db
+from app.db import TenantCollection
 
 class IAgentService(Protocol):
     async def create_agent(self, req: AgentCreateRequest) -> AgentResponse: ...
@@ -32,9 +32,10 @@ class IAgentService(Protocol):
 # SYSTEM_AGENTS moved to app/services/agents/system_agents.py
 
 class AgentService(IAgentService):
-    def __init__(self, llm_service: ILlmService, prompt_writer_service: IPromptWriterAgentService):
+    def __init__(self, llm_service: ILlmService, prompt_writer_service: IPromptWriterAgentService, collection: TenantCollection):
         self.llm_service = llm_service
         self.prompt_writer = prompt_writer_service
+        self.collection = collection
 
     async def create_agent(self, req: AgentCreateRequest) -> AgentResponse:
         new_agent = AgentDocument(
@@ -50,10 +51,10 @@ class AgentService(IAgentService):
         )
         
         doc = new_agent.model_dump()
-        res = db.get_agents_collection().insert_one(doc)
+        res = self.collection.insert_one(doc)
         
         base_id_str = str(res.inserted_id)
-        db.get_agents_collection().update_one(
+        self.collection.update_one(
             {"_id": res.inserted_id},
             {"$set": {"base_id": base_id_str}}
         )
@@ -64,9 +65,9 @@ class AgentService(IAgentService):
     def _get_agent_doc(self, agent_id: str) -> Optional[dict]:
         base_id, version = parse_agent_id(agent_id)
         if version is not None:
-            return db.get_agents_collection().find_one({"base_id": base_id, "version": version})
+            return self.collection.find_one({"base_id": base_id, "version": version})
         else:
-            return db.get_agents_collection().find_one({"base_id": base_id}, sort=[("version", -1)])
+            return self.collection.find_one({"base_id": base_id}, sort=[("version", -1)])
 
     def get_agent(self, agent_id: str) -> Optional[AgentResponse]:
         if agent_id in SYSTEM_AGENTS:
@@ -82,7 +83,7 @@ class AgentService(IAgentService):
             return None
             
         base_id = doc["base_id"]
-        latest_doc = db.get_agents_collection().find_one({"base_id": base_id}, sort=[("version", -1)])
+        latest_doc = self.collection.find_one({"base_id": base_id}, sort=[("version", -1)])
         
         if new_version:
             new_version_num = latest_doc.get("version", 1) + 1
@@ -100,7 +101,7 @@ class AgentService(IAgentService):
                 "updated_at": datetime.utcnow()
             }
             
-            res = db.get_agents_collection().insert_one(updated_data)
+            res = self.collection.insert_one(updated_data)
             updated_data["_id"] = res.inserted_id
             return format_agent_response(updated_data)
         else:
@@ -115,13 +116,13 @@ class AgentService(IAgentService):
             if req.status is not None: update_fields["status"] = req.status
             update_fields["updated_at"] = datetime.utcnow()
             
-            db.get_agents_collection().update_one(
+            self.collection.update_one(
                 {"_id": latest_doc["_id"]},
                 {"$set": update_fields}
             )
             
             # Fetch updated doc to return correctly
-            updated_doc = db.get_agents_collection().find_one({"_id": latest_doc["_id"]})
+            updated_doc = self.collection.find_one({"_id": latest_doc["_id"]})
             return format_agent_response(updated_doc)
 
     def get_all_agents(self) -> List[AgentResponse]:
@@ -132,13 +133,13 @@ class AgentService(IAgentService):
                 "doc": {"$first": "$$ROOT"}
             }}
         ]
-        latest_agents = list(db.get_agents_collection().aggregate(pipeline))
+        latest_agents = list(self.collection.aggregate(pipeline))
         db_agents = [format_agent_response(a["doc"]) for a in latest_agents]
         return list(SYSTEM_AGENTS.values()) + db_agents
 
     def delete_agent(self, agent_id: str) -> bool:
         base_id, _ = parse_agent_id(agent_id)
-        res = db.get_agents_collection().delete_many({"base_id": base_id})
+        res = self.collection.delete_many({"base_id": base_id})
         return res.deleted_count > 0
 
     async def regenerate_prompt(self, agent_id: str) -> Optional[AgentResponse]:
@@ -162,7 +163,7 @@ class AgentService(IAgentService):
                 llm_id=doc["llm_id"]
             )
             
-            db.get_agents_collection().update_one(
+            self.collection.update_one(
                 {"_id": doc["_id"]},
                 {"$set": {
                     "system_prompt": new_prompt,
@@ -173,7 +174,7 @@ class AgentService(IAgentService):
         except Exception as e:
             print(f"Error generating prompt in background: {e}")
             if 'doc' in locals() and doc:
-                db.get_agents_collection().update_one(
+                self.collection.update_one(
                     {"_id": doc["_id"]},
                     {"$set": {
                         "status": "error",

@@ -19,6 +19,7 @@ class RagResponse(BaseModel):
     updated_at: datetime
 
 class RagDocument(BaseModel):
+    org_id: Optional[str] = None
     title: str
     content: str
     embedding: Optional[List[float]] = None

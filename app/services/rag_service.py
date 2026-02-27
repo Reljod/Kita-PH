@@ -3,8 +3,8 @@ from datetime import datetime
 from typing import List, Optional, Dict, Any, Protocol
 from bson import ObjectId
 from sentence_transformers import SentenceTransformer
-from app.db import db
 from app.models.rag import RagCreateRequest, RagUpdateRequest, RagResponse, RagDocument
+from app.db import TenantCollection
 
 class IRagService(Protocol):
     async def add_rag(self, req: RagCreateRequest) -> RagResponse:
@@ -35,6 +35,9 @@ def format_rag_response(doc: Dict[str, Any]) -> RagResponse:
 class MongoVectorDbRagService(IRagService):
     _model = None
 
+    def __init__(self, collection: TenantCollection):
+        self.collection = collection
+
     @classmethod
     def get_model(cls):
         if cls._model is None:
@@ -49,7 +52,7 @@ class MongoVectorDbRagService(IRagService):
             status="pending"
         )
         doc = new_rag.model_dump()
-        res = db.get_rag_collection().insert_one(doc)
+        res = self.collection.insert_one(doc)
         doc["_id"] = res.inserted_id
         return format_rag_response(doc)
 
@@ -69,7 +72,7 @@ class MongoVectorDbRagService(IRagService):
         if "content" in update_data:
             update_data["status"] = "pending"
 
-        db.get_rag_collection().update_one(
+        self.collection.update_one(
             {"_id": obj_id},
             {"$set": update_data}
         )
@@ -85,7 +88,7 @@ class MongoVectorDbRagService(IRagService):
         except Exception:
             raise ValueError("Invalid RAG ID")
         
-        res = db.get_rag_collection().delete_one({"_id": obj_id})
+        res = self.collection.delete_one({"_id": obj_id})
         return res.deleted_count > 0
 
     def get_rag(self, rag_id: str) -> Optional[RagResponse]:
@@ -94,20 +97,20 @@ class MongoVectorDbRagService(IRagService):
         except Exception:
             raise ValueError("Invalid RAG ID")
             
-        doc = db.get_rag_collection().find_one({"_id": obj_id})
+        doc = self.collection.find_one({"_id": obj_id})
         if not doc:
             return None
             
         return format_rag_response(doc)
 
     def get_all_rags(self) -> List[RagResponse]:
-        docs = db.get_rag_collection().find().sort("updated_at", -1)
+        docs = self.collection.find().sort("updated_at", -1)
         return [format_rag_response(d) for d in docs]
 
     async def update_embedding(self, rag_id: str):
         try:
             obj_id = ObjectId(rag_id)
-            doc = db.get_rag_collection().find_one({"_id": obj_id})
+            doc = self.collection.find_one({"_id": obj_id})
             if not doc:
                 return
 
@@ -116,7 +119,7 @@ class MongoVectorDbRagService(IRagService):
             loop = asyncio.get_event_loop()
             embedding = await loop.run_in_executor(None, model.encode, doc["content"])
             
-            db.get_rag_collection().update_one(
+            self.collection.update_one(
                 {"_id": obj_id},
                 {
                     "$set": {
@@ -129,7 +132,7 @@ class MongoVectorDbRagService(IRagService):
         except Exception as e:
             print(f"Error updating embedding for {rag_id}: {e}")
             try:
-                db.get_rag_collection().update_one(
+                self.collection.update_one(
                     {"_id": ObjectId(rag_id)},
                     {"$set": {"status": "error", "updated_at": datetime.utcnow()}}
                 )
@@ -157,7 +160,7 @@ class MongoVectorDbRagService(IRagService):
         ]
         
         try:
-            docs = list(db.get_rag_collection().aggregate(pipeline))
+            docs = list(self.collection.aggregate(pipeline))
             return [format_rag_response(d) for d in docs]
         except Exception as e:
             print(f"Error during vector search: {e}")

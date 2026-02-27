@@ -22,6 +22,7 @@ class ChatContinueRequest(BaseModel):
 
 # Model to represent DB document
 class ChatDocument(BaseModel):
+    org_id: Optional[str] = None
     messages: List[Any] = Field(default_factory=list)
     agent_id: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)

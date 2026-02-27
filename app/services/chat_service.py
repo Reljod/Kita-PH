@@ -4,8 +4,8 @@ from typing import List, Optional, Dict, Any, Protocol
 from app.models.chat import ChatCreateRequest, ChatResponse, ChatContinueRequest, ChatDocument
 from pydantic_core import to_jsonable_python
 from pydantic_ai import ModelMessagesTypeAdapter
-from app.db import db
 from app.services.agent_service import IAgentService
+from app.db import TenantCollection
 
 class IChatService(Protocol):
     async def create_chat(self, req: ChatCreateRequest, agent_id: Optional[str] = None) -> ChatResponse:
@@ -27,12 +27,13 @@ def format_chat_response(doc: Dict[str, Any]) -> ChatResponse:
     )
 
 class ChatService(IChatService):
-    def __init__(self, agent_service: IAgentService):
+    def __init__(self, agent_service: IAgentService, collection: TenantCollection):
         self.agent_service = agent_service
+        self.collection = collection
 
     async def create_chat(self, req: ChatCreateRequest, agent_id: Optional[str] = None) -> ChatResponse:
         agent = self.agent_service.get_runnable_agent(agent_id=agent_id)
-        result = await agent.run(req.message)
+        result = await agent.run(req.message, deps={"org_id": self.collection.org_id})
         
         messages_dump = to_jsonable_python(result.all_messages())
         
@@ -42,7 +43,7 @@ class ChatService(IChatService):
         )
         
         doc = new_chat.model_dump()
-        res = db.get_chats_collection().insert_one(doc)
+        res = self.collection.insert_one(doc)
         doc["_id"] = res.inserted_id
         
         return format_chat_response(doc)
@@ -57,7 +58,7 @@ class ChatService(IChatService):
         if agent_id:
             chat_query["agent_id"] = agent_id
             
-        chat = db.get_chats_collection().find_one(chat_query)
+        chat = self.collection.find_one(chat_query)
         if not chat:
             return None
             
@@ -67,12 +68,12 @@ class ChatService(IChatService):
         # Load history
         message_history = ModelMessagesTypeAdapter.validate_python(chat["messages"])
         
-        result = await agent.run(req.message, message_history=message_history)
+        result = await agent.run(req.message, message_history=message_history, deps={"org_id": self.collection.org_id})
         
         # Dump new history
         messages_dump = to_jsonable_python(result.all_messages())
         
-        db.get_chats_collection().update_one(
+        self.collection.update_one(
             {"_id": obj_id},
             {
                 "$set": {
@@ -82,7 +83,7 @@ class ChatService(IChatService):
             }
         )
         
-        updated_chat = db.get_chats_collection().find_one({"_id": obj_id})
+        updated_chat = self.collection.find_one({"_id": obj_id})
         return format_chat_response(updated_chat)
 
     def get_chat(self, chat_id: str, agent_id: Optional[str] = None) -> Optional[ChatResponse]:
@@ -95,7 +96,7 @@ class ChatService(IChatService):
         if agent_id:
             chat_query["agent_id"] = agent_id
             
-        chat = db.get_chats_collection().find_one(chat_query)
+        chat = self.collection.find_one(chat_query)
         if not chat:
             return None
             
@@ -105,5 +106,5 @@ class ChatService(IChatService):
         query = {}
         if agent_id:
             query["agent_id"] = agent_id
-        chats = db.get_chats_collection().find(query).sort("updated_at", -1)
+        chats = self.collection.find(query).sort("updated_at", -1)
         return [format_chat_response(c) for c in chats]

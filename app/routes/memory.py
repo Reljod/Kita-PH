@@ -2,11 +2,14 @@ from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, status, 
 from typing import List
 from app.models.rag import RagCreateRequest, RagResponse, RagUpdateRequest
 from app.services.rag_service import MongoVectorDbRagService, IRagService
+from app.db import db, TenantCollection
+from app.security import get_current_org_id
 
 router = APIRouter(prefix="/memory", tags=["Memory"])
 
-def get_rag_service() -> IRagService:
-    return MongoVectorDbRagService()
+def get_rag_service(org_id: str = Depends(get_current_org_id)) -> IRagService:
+    collection = TenantCollection(db.get_rag_collection(), org_id)
+    return MongoVectorDbRagService(collection)
 
 @router.post("", response_model=RagResponse, status_code=status.HTTP_201_CREATED)
 async def create_rag(
