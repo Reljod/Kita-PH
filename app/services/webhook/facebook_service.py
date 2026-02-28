@@ -79,7 +79,7 @@ class FacebookService:
         print(f"Received message from facebook user {sender_id} to page {recipient_id}: {message_text}")
         
         org_service = OrganizationService()
-        org = org_service.get_org_by_integration_id("facebook_page_id", sender_id)
+        org = org_service.get_org_by_integration_id("facebook_page_id", recipient_id)
         if not org:
             print(f"No organization mapping found for Facebook Page ID: {sender_id}")
             return
