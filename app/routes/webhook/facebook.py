@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Request, Query, Header, HTTPException, Depends
+from fastapi import APIRouter, Request, Query, Header, HTTPException, Depends, Response
 from app.services.webhook.facebook_service import FacebookService
 from typing import Optional
 
@@ -17,7 +17,8 @@ def verify(
     """
     Handle verification from Facebook.
     """
-    return facebook_service.verify_webhook(mode, token, challenge)
+    challenge_response = facebook_service.verify_webhook(mode, token, challenge)
+    return Response(content=challenge_response, media_type="text/plain")
 
 @router.post("/")
 async def handle_event(
