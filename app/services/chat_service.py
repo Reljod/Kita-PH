@@ -14,14 +14,33 @@ class IChatService(Protocol):
         ...
     def get_chat(self, chat_id: str, agent_id: Optional[str] = None) -> Optional[ChatResponse]:
         ...
-    def get_all_chats(self, agent_id: Optional[str] = None) -> List[ChatResponse]:
+    def get_all_chats(self, agent_id: Optional[str] = None, preview: bool = False, limit: Optional[int] = None) -> List[ChatResponse]:
         ...
 
-def format_chat_response(doc: Dict[str, Any]) -> ChatResponse:
+def format_chat_response(doc: Dict[str, Any], preview_only: bool = False) -> ChatResponse:
+    messages = doc["messages"]
+    preview_text = None
+    
+    if messages:
+        # Get the first user message content for preview
+        first_msg = messages[0]
+        content = ""
+        if isinstance(first_msg, dict):
+            if "parts" in first_msg:
+                content = "\n".join([p["content"] for p in first_msg["parts"] if p.get("part_kind") != "thinking"])
+            else:
+                content = first_msg.get("content", "")
+        
+        preview_text = content[:100] + "..." if len(content) > 100 else content
+        
+        if preview_only:
+            messages = [first_msg] # Only return the first message if previewing
+
     return ChatResponse(
         id=str(doc["_id"]),
-        messages=doc["messages"],
+        messages=messages,
         agent_id=doc.get("agent_id"),
+        preview=preview_text,
         created_at=doc["created_at"],
         updated_at=doc["updated_at"]
     )
@@ -102,9 +121,13 @@ class ChatService(IChatService):
             
         return format_chat_response(chat)
 
-    def get_all_chats(self, agent_id: Optional[str] = None) -> List[ChatResponse]:
+    def get_all_chats(self, agent_id: Optional[str] = None, preview: bool = False, limit: Optional[int] = None) -> List[ChatResponse]:
         query = {}
         if agent_id:
             query["agent_id"] = agent_id
-        chats = self.collection.find(query).sort("updated_at", -1)
-        return [format_chat_response(c) for c in chats]
+        
+        cursor = self.collection.find(query).sort("updated_at", -1)
+        if limit:
+            cursor = cursor.limit(limit)
+            
+        return [format_chat_response(c, preview_only=preview) for c in cursor]

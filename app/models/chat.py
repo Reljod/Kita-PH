@@ -14,6 +14,7 @@ class ChatResponse(BaseModel):
     id: str
     messages: List[Any]
     agent_id: Optional[str] = None
+    preview: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 

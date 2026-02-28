@@ -21,7 +21,7 @@ class IAgentService(Protocol):
     async def create_agent(self, req: AgentCreateRequest) -> AgentResponse: ...
     async def update_agent(self, agent_id: str, req: AgentUpdateRequest, new_version: bool = True) -> Optional[AgentResponse]: ...
     def get_agent(self, agent_id: str) -> Optional[AgentResponse]: ...
-    def get_all_agents(self) -> List[AgentResponse]: ...
+    def get_all_agents(self, include_last_chat: bool = False) -> List[AgentResponse]: ...
     def delete_agent(self, agent_id: str) -> bool: ...
     async def regenerate_prompt(self, agent_id: str) -> Optional[AgentResponse]: ...
     def get_runnable_agent(self, agent_id: Optional[str] = None) -> Agent: ...
@@ -125,7 +125,7 @@ class AgentService(IAgentService):
             updated_doc = self.collection.find_one({"_id": latest_doc["_id"]})
             return format_agent_response(updated_doc)
 
-    def get_all_agents(self) -> List[AgentResponse]:
+    def get_all_agents(self, include_last_chat: bool = False) -> List[AgentResponse]:
         pipeline = [
             {"$sort": {"version": -1}},
             {"$group": {
@@ -135,7 +135,19 @@ class AgentService(IAgentService):
         ]
         latest_agents = list(self.collection.aggregate(pipeline))
         db_agents = [format_agent_response(a["doc"]) for a in latest_agents]
-        return list(SYSTEM_AGENTS.values()) + db_agents
+        all_agents = list(SYSTEM_AGENTS.values()) + db_agents
+        
+        if include_last_chat:
+            from app.services.chat_service import ChatService
+            chats_coll = TenantCollection(db.get_chats_collection(), self.collection.org_id)
+            chat_service = ChatService(self, chats_coll)
+            
+            for agent in all_agents:
+                last_chats = chat_service.get_all_chats(agent_id=agent.id, preview=True, limit=1)
+                if last_chats:
+                    agent.last_chat = last_chats[0]
+                    
+        return all_agents
 
     def delete_agent(self, agent_id: str) -> bool:
         base_id, _ = parse_agent_id(agent_id)

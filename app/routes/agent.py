@@ -67,8 +67,8 @@ def get_agent(agent_id: str, service: IAgentService = Depends(get_agent_service)
     return agent
 
 @router.get("/", response_model=List[AgentResponse])
-def get_all_agents(service: IAgentService = Depends(get_agent_service)):
-    return service.get_all_agents()
+def get_all_agents(last_chat: bool = False, service: IAgentService = Depends(get_agent_service)):
+    return service.get_all_agents(include_last_chat=last_chat)
 
 @router.delete("/{agent_id}")
 def delete_agent(agent_id: str, service: IAgentService = Depends(get_agent_service)):
@@ -133,5 +133,5 @@ async def get_agent_chat(agent_id: str, chat_id: str, chat_service: IChatService
     return chat
 
 @router.get("/{agent_id}/chat", response_model=List[ChatResponse])
-async def get_all_agent_chats(agent_id: str, chat_service: IChatService = Depends(get_chat_service)):
-    return chat_service.get_all_chats(agent_id=agent_id)
+async def get_all_agent_chats(agent_id: str, preview: bool = False, chat_service: IChatService = Depends(get_chat_service)):
+    return chat_service.get_all_chats(agent_id=agent_id, preview=preview)

@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Any, Optional
 from datetime import datetime
 
 def parse_agent_id(agent_id_str: str) -> tuple[str, Optional[int]]:
@@ -36,6 +36,7 @@ class AgentResponse(BaseModel):
     system_prompt: Optional[str]
     status: str
     llm_id: str
+    last_chat: Optional[Any] = None
     created_at: datetime
     updated_at: datetime
 
