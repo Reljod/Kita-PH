@@ -4,7 +4,7 @@ from bson import ObjectId
 from app.db import Database
 from app.models.organization import (
     OrganizationDocument, OrgCreate, OrgUpdate, OrganizationResponse, 
-    OrgMember, OrgRole, OrgMemberUpdate
+    OrgMember, OrgRole, OrgMemberUpdate, OrgIntegrationUpdate
 )
 
 class OrganizationService:
@@ -52,6 +52,13 @@ class OrganizationService:
             return OrganizationResponse(**org)
         return None
 
+    def get_org_by_integration_id(self, integration_type: str, integration_id: str) -> Optional[OrganizationResponse]:
+        org = self.collection.find_one({f"integrations.{integration_type}": integration_id})
+        if org:
+            org["id"] = str(org["_id"])
+            return OrganizationResponse(**org)
+        return None
+
     def get_org_by_id_or_code(self, identifier: str) -> Optional[OrganizationResponse]:
         # Try ID first
         org = self.get_org(identifier)
@@ -70,6 +77,25 @@ class OrganizationService:
         result = self.collection.find_one_and_update(
             {"_id": ObjectId(org_id)},
             {"$set": update_data},
+            return_document=True
+        )
+        if result:
+            result["id"] = str(result["_id"])
+            return OrganizationResponse(**result)
+        return None
+
+    def update_integrations(self, org_id: str, integration_in: OrgIntegrationUpdate) -> Optional[OrganizationResponse]:
+        update_data = integration_in.model_dump(exclude_unset=True)
+        if not update_data:
+            return self.get_org(org_id)
+            
+        set_data = {"updated_at": datetime.utcnow()}
+        for k, v in update_data.items():
+            set_data[f"integrations.{k}"] = v
+            
+        result = self.collection.find_one_and_update(
+            {"_id": ObjectId(org_id)},
+            {"$set": set_data},
             return_document=True
         )
         if result:

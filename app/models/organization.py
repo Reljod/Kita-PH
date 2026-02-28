@@ -12,9 +12,13 @@ class OrgMember(BaseModel):
     user_id: str
     role: OrgRole
 
+class Integrations(BaseModel):
+    facebook_page_id: Optional[str] = None
+
 class OrganizationBase(BaseModel):
     org_name: str = ""
     org_code: str = ""
+    integrations: Optional[Integrations] = Field(default_factory=Integrations)
 
 class OrgCreate(BaseModel):
     org_name: str
@@ -27,6 +31,9 @@ class OrgUpdate(BaseModel):
 class OrgMemberUpdate(BaseModel):
     user_id: str
     role: OrgRole
+
+class OrgIntegrationUpdate(BaseModel):
+    facebook_page_id: Optional[str] = None
 
 class OrganizationResponse(OrganizationBase):
     id: str

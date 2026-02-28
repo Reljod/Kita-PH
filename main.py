@@ -7,6 +7,7 @@ from pydantic_ai import Agent
 
 from app.db import db
 from app.routes import chat, memory, agent, llm, auth, user, organization
+from app.routes.webhook import facebook
 from app.security import require_org_membership
 from fastapi import Depends
 
@@ -39,6 +40,7 @@ app = FastAPI(
 app.include_router(auth.router)
 app.include_router(user.router)
 app.include_router(organization.router)
+app.include_router(facebook.router)
 
 # Protected Routers - Require Organization Membership
 protected_deps = [Depends(require_org_membership)]
