@@ -1,11 +1,10 @@
-from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
-from typing import List, Optional
+from fastapi import APIRouter, HTTPException, Depends
+from typing import List
 from app.models.agent import AgentCreateRequest, AgentUpdateRequest, AgentResponse
 from app.models.chat import ChatCreateRequest, ChatResponse, ChatContinueRequest
 from app.services.agent_service import AgentService, IAgentService
 from app.services.chat_service import ChatService, IChatService
 from app.services.llm_service import LlmService
-from app.services.agents.creator_agent import CreatorAgentService
 from app.db import db, TenantCollection
 from app.security import get_current_org_id
 
@@ -14,20 +13,16 @@ router = APIRouter(prefix="/agent", tags=["Agent Management"])
 def get_agent_service(org_id: str = Depends(get_current_org_id)) -> IAgentService:
     llm_service_coll = TenantCollection(db.get_llms_collection(), org_id)
     llm_service = LlmService(llm_service_coll)
-    prompt_writer = CreatorAgentService(org_id)
     collection = TenantCollection(db.get_agents_collection(), org_id)
-    return AgentService(llm_service=llm_service, prompt_writer_service=prompt_writer, collection=collection)
+    return AgentService(llm_service=llm_service, collection=collection)
 
 @router.post("/", response_model=AgentResponse)
 async def create_agent(
     req: AgentCreateRequest, 
-    background_tasks: BackgroundTasks,
     service: IAgentService = Depends(get_agent_service)
 ):
     try:
-        agent = await service.create_agent(req)
-        background_tasks.add_task(service.generate_prompt_background, agent.id)
-        return agent
+        return await service.create_agent(req)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -35,28 +30,12 @@ async def create_agent(
 async def update_agent(
     agent_id: str, 
     req: AgentUpdateRequest, 
-    background_tasks: BackgroundTasks,
     service: IAgentService = Depends(get_agent_service),
     new_version: bool = True
 ):
-    # If core fields are updated, we should regenerate the prompt
-    needs_regeneration = any([
-        req.role is not None, 
-        req.goal is not None, 
-        req.backstory is not None,
-        req.llm_id is not None
-    ])
-    
-    if needs_regeneration:
-        req.status = "pending"
-
     agent = await service.update_agent(agent_id, req, new_version=new_version)
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
-        
-    if needs_regeneration:
-        background_tasks.add_task(service.generate_prompt_background, agent.id)
-        
     return agent
 
 @router.get("/{agent_id}", response_model=AgentResponse)
@@ -76,21 +55,6 @@ def delete_agent(agent_id: str, service: IAgentService = Depends(get_agent_servi
     if not success:
         raise HTTPException(status_code=404, detail="Agent not found")
     return {"message": "Agent deleted successfully"}
-
-@router.post("/{agent_id}/regenerate-prompt", response_model=AgentResponse)
-async def regenerate_prompt(
-    agent_id: str, 
-    background_tasks: BackgroundTasks,
-    service: IAgentService = Depends(get_agent_service)
-):
-    try:
-        agent = await service.regenerate_prompt(agent_id)
-        if not agent:
-            raise HTTPException(status_code=404, detail="Agent not found")
-        background_tasks.add_task(service.generate_prompt_background, agent.id)
-        return agent
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
 
 def get_chat_service(
     org_id: str = Depends(get_current_org_id),

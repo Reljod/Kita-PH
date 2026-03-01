@@ -4,7 +4,6 @@ from app.models.chat import ChatCreateRequest, ChatResponse, ChatContinueRequest
 from app.services.chat_service import ChatService, IChatService
 from app.services.agent_service import IAgentService, AgentService
 from app.services.llm_service import LlmService
-from app.services.agents.creator_agent import CreatorAgentService
 from app.db import db, TenantCollection
 from app.security import get_current_org_id
 
@@ -13,9 +12,8 @@ router = APIRouter(prefix="/chat", tags=["Chat"])
 def get_agent_service(org_id: str = Depends(get_current_org_id)) -> IAgentService:
     llm_service_coll = TenantCollection(db.get_llms_collection(), org_id)
     llm_service = LlmService(llm_service_coll)
-    prompt_writer = CreatorAgentService(org_id)
     collection = TenantCollection(db.get_agents_collection(), org_id)
-    return AgentService(llm_service=llm_service, prompt_writer_service=prompt_writer, collection=collection)
+    return AgentService(llm_service=llm_service, collection=collection)
 
 def get_chat_service(
     org_id: str = Depends(get_current_org_id),

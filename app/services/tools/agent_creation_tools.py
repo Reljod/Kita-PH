@@ -1,6 +1,6 @@
 from pydantic_ai import FunctionToolset
 from pydantic import Field
-from typing import Optional, Annotated
+from typing import List, Optional, Annotated
 from pydantic_ai import RunContext
 from app.db import db, TenantCollection
 from app.models.agent import AgentDocument, format_agent_response
@@ -14,7 +14,7 @@ async def create_agent(
     role: Annotated[str, Field(description="The role assigned to the new agent.")],
     goal: Annotated[str, Field(description="The goal of the new agent.")],
     backstory: Annotated[str, Field(description="The backstory of the new agent.")],
-    instructions: Annotated[str, Field(description="Instructions for the agent (this will be used as the system prompt).")],
+    personalities: Annotated[Optional[List[str]], Field(description="A list of personality traits for the agent (e.g. 'friendly', 'concise', 'formal', 'empathetic'). These shape how the agent communicates.")] = None,
     llm_id: Annotated[Optional[str], Field(description="The ID of the LLM model to use for this agent. If not provided, it will be automatically selected based on environment defaults.")] = None
 ) -> str:
     """
@@ -25,8 +25,7 @@ async def create_agent(
     import os
     from app.services.llm_service import LlmService
     from app.services.agent_service import AgentService
-    from app.services.agents.creator_agent import CreatorAgentService
-    from app.models.agent import AgentCreateRequest, AgentUpdateRequest
+    from app.models.agent import AgentCreateRequest
 
     org_id = ctx.deps["org_id"]
     llm_service_coll = TenantCollection(db.get_llms_collection(), org_id)
@@ -44,12 +43,10 @@ async def create_agent(
             
         llm_id = match.id if match else ""
 
-    prompt_writer = CreatorAgentService(org_id)
     agent_coll = TenantCollection(db.get_agents_collection(), org_id)
     
     agent_service = AgentService(
-        llm_service=llm_service, 
-        prompt_writer_service=prompt_writer, 
+        llm_service=llm_service,
         collection=agent_coll
     )
 
@@ -58,17 +55,12 @@ async def create_agent(
         role=role,
         goal=goal,
         backstory=backstory,
+        personalities=personalities,
         llm_id=llm_id
     )
     agent = await agent_service.create_agent(req)
     
-    update_req = AgentUpdateRequest(
-        system_prompt=instructions,
-        status="completed"
-    )
-    updated_agent = await agent_service.update_agent(agent.id, update_req, new_version=False)
-    
-    return f"Successfully created agent '{name}' with ID: {updated_agent.id}"
+    return f"Successfully created agent '{name}' with ID: {agent.id}"
 
 @creator_toolset.tool
 async def check_agent_exists(
@@ -97,7 +89,7 @@ async def check_agent_exists(
         f"Role: {agent.role}\n"
         f"Goal: {agent.goal}\n"
         f"Backstory: {agent.backstory}\n"
-        f"Status: {agent.status}"
+        f"Personalities: {', '.join(agent.personalities) if agent.personalities else 'None'}"
     )
 
 @creator_toolset.tool
@@ -108,9 +100,9 @@ async def update_agent(
     role: Annotated[Optional[str], Field(description="The new role of the agent.")] = None,
     goal: Annotated[Optional[str], Field(description="The new goal of the agent.")] = None,
     backstory: Annotated[Optional[str], Field(description="The new backstory of the agent.")] = None,
-    instructions: Annotated[Optional[str], Field(description="New system instructions for the agent.")] = None,
+    personalities: Annotated[Optional[List[str]], Field(description="Updated list of personality traits for the agent.")] = None,
     llm_id: Annotated[Optional[str], Field(description="The new LLM ID for the agent.")] = None,
-    new_version: Annotated[bool, Field(description="Whether to create a new version (True) or update the current version in place (False). Set to False for iterating/tweaking prompts.")] = True
+    new_version: Annotated[bool, Field(description="Whether to create a new version (True) or update the current version in place (False). Set to False for iterating/tweaking.")] = True
 ) -> str:
     """
     Updates an existing agent's configuration.
@@ -119,22 +111,20 @@ async def update_agent(
     from app.models.agent import parse_agent_id, AgentUpdateRequest
     from app.services.llm_service import LlmService
     from app.services.agent_service import AgentService
-    from app.services.agents.creator_agent import CreatorAgentService
     
     org_id = ctx.deps["org_id"]
     llm_service_coll = TenantCollection(db.get_llms_collection(), org_id)
     llm_service = LlmService(llm_service_coll)
-    prompt_writer = CreatorAgentService(org_id)
     agent_coll = TenantCollection(db.get_agents_collection(), org_id)
-    service = AgentService(llm_service=llm_service, prompt_writer_service=prompt_writer, collection=agent_coll)
+    service = AgentService(llm_service=llm_service, collection=agent_coll)
     
     update_req = AgentUpdateRequest(
         name=name,
         role=role,
         goal=goal,
         backstory=backstory,
+        personalities=personalities,
         llm_id=llm_id,
-        system_prompt=instructions
     )
     
     updated_agent = await service.update_agent(agent_id, update_req, new_version=new_version)

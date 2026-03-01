@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Any, Optional
+from typing import Any, List, Optional
 from datetime import datetime
 
 def parse_agent_id(agent_id_str: str) -> tuple[str, Optional[int]]:
@@ -15,6 +15,7 @@ class AgentCreateRequest(BaseModel):
     goal: str
     backstory: str
     llm_id: str
+    personalities: Optional[List[str]] = None
 
 class AgentUpdateRequest(BaseModel):
     name: Optional[str] = None
@@ -22,8 +23,7 @@ class AgentUpdateRequest(BaseModel):
     goal: Optional[str] = None
     backstory: Optional[str] = None
     llm_id: Optional[str] = None
-    system_prompt: Optional[str] = None
-    status: Optional[str] = None
+    personalities: Optional[List[str]] = None
 
 class AgentResponse(BaseModel):
     id: str
@@ -33,8 +33,8 @@ class AgentResponse(BaseModel):
     role: str
     goal: str
     backstory: str
-    system_prompt: Optional[str]
-    status: str
+    personalities: Optional[List[str]] = None
+    system_prompt: Optional[str] = None
     llm_id: str
     last_chat: Optional[Any] = None
     created_at: datetime
@@ -48,13 +48,12 @@ class AgentDocument(BaseModel):
     role: str
     goal: str
     backstory: str
-    system_prompt: Optional[str] = None
-    status: str = "pending"
+    personalities: Optional[List[str]] = None
     llm_id: str
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
-def format_agent_response(doc: dict) -> AgentResponse:
+def format_agent_response(doc: dict, system_prompt: Optional[str] = None) -> AgentResponse:
     base_id = doc.get("base_id") or str(doc["_id"])
     version = doc.get("version", 1)
     
@@ -68,8 +67,8 @@ def format_agent_response(doc: dict) -> AgentResponse:
         role=doc["role"],
         goal=doc["goal"],
         backstory=doc["backstory"],
-        system_prompt=doc.get("system_prompt"),
-        status=doc.get("status", "completed"),
+        personalities=doc.get("personalities"),
+        system_prompt=system_prompt,
         llm_id=doc["llm_id"],
         created_at=doc.get("created_at", datetime.utcnow()),
         updated_at=doc.get("updated_at", datetime.utcnow())

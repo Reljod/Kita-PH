@@ -8,7 +8,6 @@ from app.services.organization_service import OrganizationService
 from app.services.chat_service import ChatService
 from app.services.agent_service import AgentService
 from app.services.llm_service import LlmService
-from app.services.agents.creator_agent import CreatorAgentService
 from app.db import db, TenantCollection
 from app.models.chat import ChatCreateRequest
 
@@ -89,9 +88,8 @@ class FacebookService:
         
         llm_service_coll = TenantCollection(db.get_llms_collection(), org_id)
         llm_service = LlmService(llm_service_coll)
-        prompt_writer = CreatorAgentService(org_id)
         agent_coll = TenantCollection(db.get_agents_collection(), org_id)
-        agent_service = AgentService(llm_service=llm_service, prompt_writer_service=prompt_writer, collection=agent_coll)
+        agent_service = AgentService(llm_service=llm_service, collection=agent_coll)
 
         chat_coll = TenantCollection(db.get_chats_collection(), org_id)
         chat_service = ChatService(agent_service, chat_coll)
