@@ -96,7 +96,7 @@ async def refresh(
     # Revoke old tokens
     auth_service.revoke_token(refresh_token)
     
-    return auth_service.generate_tokens(token_data.user_id)
+    return auth_service.generate_tokens(token_data.user_id, token_data.org_id)
 
 @router.post("/logout")
 async def logout(

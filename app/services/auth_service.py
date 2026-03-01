@@ -57,7 +57,12 @@ class AuthService:
             access_token_data["org_id"] = org_id
             
         access_token, expires_at = self.create_access_token(data=access_token_data)
-        refresh_token = self.create_refresh_token(data={"sub": user_id})
+        
+        refresh_token_data = {"sub": user_id}
+        if org_id:
+            refresh_token_data["org_id"] = org_id
+            
+        refresh_token = self.create_refresh_token(data=refresh_token_data)
         
         # Save tokens to database
         token_doc = TokenDocument(
