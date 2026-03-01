@@ -32,7 +32,6 @@ def _render_template(
     goal: str,
     backstory: str,
     personalities: Optional[str],
-    preferences: Optional[str],
 ) -> str:
     """Load system_prompt.md and resolve all placeholders and conditional blocks."""
     raw = _TEMPLATE_PATH.read_text(encoding="utf-8")
@@ -47,7 +46,6 @@ def _render_template(
         "goal": goal,
         "backstory": backstory,
         "personalities": personalities or "",
-        "preferences": preferences or "",
     }
 
     # Resolve conditional blocks: [[ key ]] ... [[ /key ]]
@@ -86,7 +84,6 @@ def build_system_prompt(
     goal: str,
     backstory: str,
     personalities: Optional[List[str]] = None,
-    preferences: Optional[List[str]] = None,
 ) -> str:
     """
     Build a secure, structured system prompt from agent identity fields.
@@ -101,7 +98,6 @@ def build_system_prompt(
     backstory = _sanitise(backstory)
 
     personalities_block = _to_bullets(personalities)
-    preferences_block = _to_bullets(preferences)
 
-    body = _render_template(name, role, goal, backstory, personalities_block, preferences_block)
+    body = _render_template(name, role, goal, backstory, personalities_block)
     return f"{body}\n\n{_GUARDRAILS}"

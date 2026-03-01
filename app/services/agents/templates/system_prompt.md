@@ -15,7 +15,3 @@ Personalities:
 {{personalities}}
 [[/personalities]]
 
-[[preferences]]
-Preferences:
-{{preferences}}
-[[/preferences]]

@@ -27,10 +27,6 @@ class IAgentService(Protocol):
     def get_runnable_agent(self, agent_id: Optional[str] = None) -> Agent: ...
     async def generate_prompt_background(self, agent_id: str) -> None: ...
 
-# Removed helper functions moved to models/agent.py
-
-# SYSTEM_AGENTS moved to app/services/agents/system_agents.py
-
 class AgentService(IAgentService):
     def __init__(self, llm_service: ILlmService, prompt_writer_service: IPromptWriterAgentService, collection: TenantCollection):
         self.llm_service = llm_service
