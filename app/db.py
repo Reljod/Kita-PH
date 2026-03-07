@@ -98,11 +98,17 @@ class TenantCollection:
     def aggregate(self, pipeline, *args, **kwargs):
         """Inject an org_id match into the aggregation pipeline."""
         pipeline = list(pipeline) if pipeline else []
-        
-        if pipeline and "$match" in pipeline[0]:
+        org_match = {"$match": {"org_id": self.org_id}}
+
+        if not pipeline:
+            pipeline.append(org_match)
+        elif "$vectorSearch" in pipeline[0] or "$search" in pipeline[0]:
+            # MongoDB Atlas special stages must be first. Inject org_id filter as second stage.
+            pipeline.insert(1, org_match)
+        elif "$match" in pipeline[0]:
             pipeline[0]["$match"]["org_id"] = self.org_id
         else:
-            pipeline.insert(0, {"$match": {"org_id": self.org_id}})
+            pipeline.insert(0, org_match)
             
         return self._collection.aggregate(pipeline, *args, **kwargs)
 
