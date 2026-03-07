@@ -52,7 +52,7 @@ class ChatService(IChatService):
 
     async def create_chat(self, req: ChatCreateRequest, agent_id: Optional[str] = None) -> ChatResponse:
         agent = self.agent_service.get_runnable_agent(agent_id=agent_id)
-        result = await agent.run(req.message, deps={"org_id": self.collection.org_id})
+        result = await agent.run(req.message, deps={"org_id": self.collection.org_id, "agent_id": agent_id})
         
         messages_dump = to_jsonable_python(result.all_messages())
         
@@ -87,7 +87,7 @@ class ChatService(IChatService):
         # Load history
         message_history = ModelMessagesTypeAdapter.validate_python(chat["messages"])
         
-        result = await agent.run(req.message, message_history=message_history, deps={"org_id": self.collection.org_id})
+        result = await agent.run(req.message, message_history=message_history, deps={"org_id": self.collection.org_id, "agent_id": agent_to_run_with})
         
         # Dump new history
         messages_dump = to_jsonable_python(result.all_messages())

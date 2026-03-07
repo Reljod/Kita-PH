@@ -18,8 +18,9 @@ async def search_memory(
     This uses MongoDB embeddings for vector search.
     """
     org_id = ctx.deps["org_id"]
+    agent_id = ctx.deps.get("agent_id")
     collection = TenantCollection(db.get_rag_collection(), org_id)
-    service = MongoVectorDbRagService(collection)
+    service = MongoVectorDbRagService(collection, agent_id=agent_id)
     results = await service.search(query, limit=limit)
     
     if not results:

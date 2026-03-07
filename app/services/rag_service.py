@@ -28,6 +28,7 @@ def format_rag_response(doc: Dict[str, Any]) -> RagResponse:
         title=doc["title"],
         content=doc["content"],
         status=doc.get("status", "pending"),
+        agent_id=doc.get("agent_id"),
         created_at=doc["created_at"],
         updated_at=doc["updated_at"]
     )
@@ -35,8 +36,9 @@ def format_rag_response(doc: Dict[str, Any]) -> RagResponse:
 class MongoVectorDbRagService(IRagService):
     _model = None
 
-    def __init__(self, collection: TenantCollection):
+    def __init__(self, collection: TenantCollection, agent_id: Optional[str] = None):
         self.collection = collection
+        self.agent_id = agent_id
 
     @classmethod
     def get_model(cls):
@@ -49,6 +51,7 @@ class MongoVectorDbRagService(IRagService):
         new_rag = RagDocument(
             title=req.title,
             content=req.content,
+            agent_id=req.agent_id or self.agent_id,
             status="pending"
         )
         doc = new_rag.model_dump()
@@ -72,8 +75,12 @@ class MongoVectorDbRagService(IRagService):
         if "content" in update_data:
             update_data["status"] = "pending"
 
+        query = {"_id": obj_id}
+        if self.agent_id:
+            query["agent_id"] = self.agent_id
+
         self.collection.update_one(
-            {"_id": obj_id},
+            query,
             {"$set": update_data}
         )
 
@@ -81,14 +88,17 @@ class MongoVectorDbRagService(IRagService):
         # that's usually the route's job, but it provides the method)
         
         return self.get_rag(rag_id)
-
     async def delete_rag(self, rag_id: str) -> bool:
         try:
             obj_id = ObjectId(rag_id)
         except Exception:
             raise ValueError("Invalid RAG ID")
         
-        res = self.collection.delete_one({"_id": obj_id})
+        query = {"_id": obj_id}
+        if self.agent_id:
+            query["agent_id"] = self.agent_id
+            
+        res = self.collection.delete_one(query)
         return res.deleted_count > 0
 
     def get_rag(self, rag_id: str) -> Optional[RagResponse]:
@@ -97,14 +107,22 @@ class MongoVectorDbRagService(IRagService):
         except Exception:
             raise ValueError("Invalid RAG ID")
             
-        doc = self.collection.find_one({"_id": obj_id})
+        query = {"_id": obj_id}
+        if self.agent_id:
+            query["$or"] = [{"agent_id": self.agent_id}, {"agent_id": None}]
+            
+        doc = self.collection.find_one(query)
         if not doc:
             return None
             
         return format_rag_response(doc)
 
     def get_all_rags(self) -> List[RagResponse]:
-        docs = self.collection.find().sort("updated_at", -1)
+        query = {}
+        if self.agent_id:
+            query["$or"] = [{"agent_id": self.agent_id}, {"agent_id": None}]
+            
+        docs = self.collection.find(query).sort("updated_at", -1)
         return [format_rag_response(d) for d in docs]
 
     async def update_embedding(self, rag_id: str):
@@ -160,6 +178,14 @@ class MongoVectorDbRagService(IRagService):
         ]
         
         try:
+            # If we have an agent_id, we need to filter results by it or org-wide
+            if self.agent_id:
+                pipeline.append({
+                    "$match": {
+                        "$or": [{"agent_id": self.agent_id}, {"agent_id": None}]
+                    }
+                })
+            
             docs = list(self.collection.aggregate(pipeline))
             return [format_rag_response(d) for d in docs]
         except Exception as e:
