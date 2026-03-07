@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import List, Optional
 
 _TEMPLATE_PATH = Path(__file__).parent / "system_prompt.md"
+_MEMORY_TOOL_PATH = Path(__file__).parent / "tools" / "memory.md"
 
 # Fixed guardrails — never derived from user input, always appended last.
 _GUARDRAILS = """
@@ -32,6 +33,7 @@ def _render_template(
     goal: str,
     backstory: str,
     personalities: Optional[str],
+    tools: Optional[str] = None,
 ) -> str:
     """Load system_prompt.md and resolve all placeholders and conditional blocks."""
     raw = _TEMPLATE_PATH.read_text(encoding="utf-8")
@@ -46,6 +48,7 @@ def _render_template(
         "goal": goal,
         "backstory": backstory,
         "personalities": personalities or "",
+        "tools": tools or "",
     }
 
     # Resolve conditional blocks: [[ key ]] ... [[ /key ]]
@@ -84,6 +87,7 @@ def build_system_prompt(
     goal: str,
     backstory: str,
     personalities: Optional[List[str]] = None,
+    tools: Optional[List[str]] = None,
 ) -> str:
     """
     Build a secure, structured system prompt from agent identity fields.
@@ -99,5 +103,12 @@ def build_system_prompt(
 
     personalities_block = _to_bullets(personalities)
 
-    body = _render_template(name, role, goal, backstory, personalities_block)
+    # All agents have the RAG tool by default
+    default_tools = [_MEMORY_TOOL_PATH.read_text(encoding="utf-8").strip()]
+    if tools:
+        default_tools.extend(tools)
+    
+    tools_block = "\n\n".join(default_tools)
+
+    body = _render_template(name, role, goal, backstory, personalities_block, tools_block)
     return f"{body}\n\n{_GUARDRAILS}"

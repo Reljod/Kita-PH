@@ -11,8 +11,7 @@ from app.models.agent import (
     parse_agent_id, format_agent_response
 )
 from app.services.llm_service import ILlmService
-from app.services.agents.system_agents import SYSTEM_AGENTS
-from app.services.agents.system_prompt import get_full_instructions
+from app.services.agents.system_agents import SYSTEM_AGENTS, BASE_AGENT
 from app.services.agents.templates.system_prompt import build_system_prompt
 from app.services.tools.memory_tools import memory_toolset
 from app.db import TenantCollection
@@ -176,17 +175,46 @@ class AgentService(IAgentService):
                 provider=OpenRouterProvider(api_key=api_key),
             )
             
-            instructions = get_full_instructions()
+            instructions = build_system_prompt(
+                name=BASE_AGENT.name,
+                role=BASE_AGENT.role,
+                goal=BASE_AGENT.goal,
+                backstory=BASE_AGENT.backstory,
+                personalities=BASE_AGENT.personalities
+            )
             return Agent(
                 model=model,
                 instructions=instructions,
                 toolsets=[memory_toolset]
             )
             
-        if agent_id == "agent-creator":
-            from app.services.agents.creator_agent import CreatorAgent
-            return CreatorAgent()
+        if agent_id in SYSTEM_AGENTS:
+            agent_def = SYSTEM_AGENTS[agent_id]
+            # Creator agent has special logic
+            if agent_id == "agent-creator":
+                from app.services.agents.creator_agent import CreatorAgent
+                return CreatorAgent()
             
+            # Others use the standard template
+            model_name = agent_def.llm_id or os.getenv("LLM_MODEL", "x-ai/grok-4.1-fast")
+            api_key = os.getenv("OPENROUTER_API_KEY", "")
+            model = OpenRouterModel(
+                model_name,
+                provider=OpenRouterProvider(api_key=api_key),
+            )
+            instructions = build_system_prompt(
+                name=agent_def.name,
+                role=agent_def.role,
+                goal=agent_def.goal,
+                backstory=agent_def.backstory,
+                personalities=agent_def.personalities
+            )
+            return Agent(
+                model=model,
+                instructions=instructions,
+                toolsets=[memory_toolset]
+            )
+
         doc = self._get_agent_doc(agent_id)
         if not doc:
             raise ValueError("Agent not found")
@@ -202,10 +230,9 @@ class AgentService(IAgentService):
         )
         
         system_prompt = self._build_prompt_from_doc(doc)
-        full_instructions = get_full_instructions(system_prompt)
         
         return Agent(
             model=model,
-            instructions=full_instructions,
+            instructions=system_prompt,
             toolsets=[memory_toolset]
         )
