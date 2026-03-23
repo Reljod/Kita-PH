@@ -4,6 +4,8 @@ from typing import List, Optional
 
 _TEMPLATE_PATH = Path(__file__).parent / "system_prompt.md"
 _MEMORY_TOOL_PATH = Path(__file__).parent / "tools" / "memory.md"
+_TOOLS_INSTRUCTIONS_PATH = Path(__file__).parent / "tools" / "tools.md"
+
 
 # Fixed guardrails — never derived from user input, always appended last.
 _GUARDRAILS = """
@@ -104,7 +106,10 @@ def build_system_prompt(
     personalities_block = _to_bullets(personalities)
 
     # All agents have the RAG tool by default
-    default_tools = [_MEMORY_TOOL_PATH.read_text(encoding="utf-8").strip()]
+    default_tools = [
+        _TOOLS_INSTRUCTIONS_PATH.read_text(encoding="utf-8").strip(),
+        _MEMORY_TOOL_PATH.read_text(encoding="utf-8").strip(),
+    ]
     if tools:
         default_tools.extend(tools)
     
