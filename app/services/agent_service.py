@@ -27,6 +27,7 @@ class IAgentService(Protocol):
     def get_runnable_agent(self, agent_id: Optional[str] = None) -> Agent: ...
     async def add_tools(self, agent_id: str, tool_ids: List[str]) -> bool: ...
     async def remove_tools(self, agent_id: str, tool_ids: List[str]) -> bool: ...
+    def get_agents_by_tool(self, tool_id: str) -> List[AgentResponse]: ...
 
 
 class AgentService(IAgentService):
@@ -199,6 +200,21 @@ class AgentService(IAgentService):
             }
         )
         return True
+
+    def get_agents_by_tool(self, tool_id: str) -> List[AgentResponse]:
+        # tool_id could be Mongo ID or tool name
+        query = {"tools": tool_id}
+        
+        pipeline = [
+            {"$match": query},
+            {"$sort": {"version": -1}},
+            {"$group": {
+                "_id": "$base_id",
+                "doc": {"$first": "$$ROOT"}
+            }}
+        ]
+        latest_agents = list(self.collection.aggregate(pipeline))
+        return [format_agent_response(a["doc"]) for a in latest_agents]
 
     def get_runnable_agent(self, agent_id: Optional[str] = None) -> Agent:
         if not agent_id:

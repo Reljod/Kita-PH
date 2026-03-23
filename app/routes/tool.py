@@ -1,7 +1,10 @@
 from fastapi import APIRouter, HTTPException, Depends
 from typing import List
 from app.models.tool import ToolResponse, format_tool_response, ToolRegisterRequest
+from app.models.agent import AgentResponse
 from app.services.tool_service import ToolService, IToolService
+from app.services.agent_service import AgentService, IAgentService
+from app.services.llm_service import LlmService
 from app.services.tools import get_available_tools
 from app.services.web_search_service import SerperSearchService
 from app.db import db, TenantCollection
@@ -13,6 +16,13 @@ def get_tool_service(org_id: str = Depends(get_current_org_id)) -> IToolService:
     web_search_service = SerperSearchService()
     collection = TenantCollection(db.get_tools_collection(), org_id)
     return ToolService(web_search_service=web_search_service, collection=collection)
+
+def get_agent_service(org_id: str = Depends(get_current_org_id)) -> IAgentService:
+    llm_service_coll = TenantCollection(db.get_llms_collection(), org_id)
+    llm_service = LlmService(llm_service_coll)
+    collection = TenantCollection(db.get_agents_collection(), org_id)
+    tools_collection = TenantCollection(db.get_tools_collection(), org_id)
+    return AgentService(llm_service=llm_service, collection=collection, tools_collection=tools_collection)
 
 @router.get("/", response_model=List[ToolResponse])
 async def get_tools(service: IToolService = Depends(get_tool_service)):
@@ -68,5 +78,15 @@ async def deregister_tool(tool_id: str, service: IToolService = Depends(get_tool
         if not success:
             raise HTTPException(status_code=404, detail="Tool not found")
         return {"message": f"Tool '{tool_id}' deregistered successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/{tool_id}/agents", response_model=List[AgentResponse])
+async def get_tool_agents(
+    tool_id: str, 
+    agent_service: IAgentService = Depends(get_agent_service)
+):
+    try:
+        return agent_service.get_agents_by_tool(tool_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
