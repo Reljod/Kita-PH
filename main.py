@@ -7,7 +7,7 @@ from langsmith.integrations.otel import configure
 from pydantic_ai import Agent
 
 from app.db import db
-from app.routes import chat, memory, agent, llm, auth, user, organization
+from app.routes import chat, memory, agent, llm, auth, user, organization, tool
 from app.routes.webhook import facebook
 from app.security import require_org_membership
 from fastapi import Depends
@@ -58,6 +58,7 @@ app.include_router(chat.router, dependencies=protected_deps)
 app.include_router(memory.router, dependencies=protected_deps)
 app.include_router(llm.router, dependencies=protected_deps)
 app.include_router(agent.router, dependencies=protected_deps)
+app.include_router(tool.router, dependencies=protected_deps)
 
 @app.get("/")
 def root():

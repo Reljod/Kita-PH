@@ -47,6 +47,10 @@ class Database:
     def get_tokens_collection(cls) -> Collection:
         return cls.db["tokens"]
 
+    @classmethod
+    def get_tools_collection(cls) -> Collection:
+        return cls.db["tools"]
+
 db = Database()
 
 from typing import Mapping, Any, Optional

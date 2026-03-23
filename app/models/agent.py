@@ -16,6 +16,7 @@ class AgentCreateRequest(BaseModel):
     backstory: str
     llm_id: str
     personalities: Optional[List[str]] = None
+    tools: Optional[List[str]] = Field(default_factory=list)
 
 class AgentUpdateRequest(BaseModel):
     name: Optional[str] = None
@@ -24,6 +25,7 @@ class AgentUpdateRequest(BaseModel):
     backstory: Optional[str] = None
     llm_id: Optional[str] = None
     personalities: Optional[List[str]] = None
+    tools: Optional[List[str]] = None
 
 class AgentResponse(BaseModel):
     id: str
@@ -36,6 +38,7 @@ class AgentResponse(BaseModel):
     personalities: Optional[List[str]] = None
     system_prompt: Optional[str] = None
     llm_id: str
+    tools: Optional[List[str]] = Field(default_factory=list)
     last_chat: Optional[Any] = None
     created_at: datetime
     updated_at: datetime
@@ -50,6 +53,7 @@ class AgentDocument(BaseModel):
     backstory: str
     personalities: Optional[List[str]] = None
     llm_id: str
+    tools: Optional[List[str]] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -70,6 +74,7 @@ def format_agent_response(doc: dict, system_prompt: Optional[str] = None) -> Age
         personalities=doc.get("personalities"),
         system_prompt=system_prompt,
         llm_id=doc["llm_id"],
+        tools=doc.get("tools", []),
         created_at=doc.get("created_at", datetime.utcnow()),
         updated_at=doc.get("updated_at", datetime.utcnow())
     )

@@ -14,6 +14,7 @@ from app.services.llm_service import ILlmService
 from app.services.agents.system_agents import SYSTEM_AGENTS, BASE_AGENT
 from app.services.agents.templates.system_prompt import build_system_prompt
 from app.services.tools.memory_tools import memory_toolset
+from app.services.tools import get_toolsets_by_names
 from app.db import TenantCollection
 
 
@@ -24,6 +25,8 @@ class IAgentService(Protocol):
     def get_all_agents(self, include_last_chat: bool = False) -> List[AgentResponse]: ...
     def delete_agent(self, agent_id: str) -> bool: ...
     def get_runnable_agent(self, agent_id: Optional[str] = None) -> Agent: ...
+    async def add_tools(self, agent_id: str, tool_ids: List[str]) -> bool: ...
+    async def remove_tool(self, agent_id: str, tool_id: str) -> bool: ...
 
 
 class AgentService(IAgentService):
@@ -39,6 +42,7 @@ class AgentService(IAgentService):
             backstory=req.backstory,
             personalities=req.personalities,
             llm_id=req.llm_id,
+            tools=req.tools or [],
             version=1,
             base_id=None
         )
@@ -105,6 +109,7 @@ class AgentService(IAgentService):
                 "backstory": req.backstory if req.backstory is not None else latest_doc["backstory"],
                 "personalities": req.personalities if req.personalities is not None else latest_doc.get("personalities"),
                 "llm_id": req.llm_id if req.llm_id is not None else latest_doc["llm_id"],
+                "tools": req.tools if req.tools is not None else latest_doc.get("tools", []),
                 "base_id": base_id,
                 "version": new_version_num,
                 "created_at": latest_doc.get("created_at", datetime.utcnow()),
@@ -123,6 +128,7 @@ class AgentService(IAgentService):
             if req.backstory is not None: update_fields["backstory"] = req.backstory
             if req.personalities is not None: update_fields["personalities"] = req.personalities
             if req.llm_id is not None: update_fields["llm_id"] = req.llm_id
+            if req.tools is not None: update_fields["tools"] = req.tools
             update_fields["updated_at"] = datetime.utcnow()
             
             self.collection.update_one(
@@ -164,6 +170,34 @@ class AgentService(IAgentService):
         base_id, _ = parse_agent_id(agent_id)
         res = self.collection.delete_many({"base_id": base_id})
         return res.deleted_count > 0
+
+    async def add_tools(self, agent_id: str, tool_ids: List[str]) -> bool:
+        doc = self._get_agent_doc(agent_id)
+        if not doc:
+            return False
+        
+        self.collection.update_one(
+            {"_id": doc["_id"]},
+            {"$set": {"tools": tool_ids, "updated_at": datetime.utcnow()}}
+        )
+        return True
+
+    async def remove_tool(self, agent_id: str, tool_id: str) -> bool:
+        doc = self._get_agent_doc(agent_id)
+        if not doc:
+            return False
+        
+        tools = doc.get("tools", [])
+        if tool_id not in tools:
+            return True
+            
+        new_tools = [t for t in tools if t != tool_id]
+        
+        self.collection.update_one(
+            {"_id": doc["_id"]},
+            {"$set": {"tools": new_tools, "updated_at": datetime.utcnow()}}
+        )
+        return True
 
     def get_runnable_agent(self, agent_id: Optional[str] = None) -> Agent:
         if not agent_id:
@@ -231,8 +265,11 @@ class AgentService(IAgentService):
         
         system_prompt = self._build_prompt_from_doc(doc)
         
+        tool_names = doc.get("tools", [])
+        dynamic_toolsets = get_toolsets_by_names(tool_names)
+        
         return Agent(
             model=model,
             instructions=system_prompt,
-            toolsets=[memory_toolset]
+            toolsets=[memory_toolset] + dynamic_toolsets
         )
