@@ -26,13 +26,14 @@ class IAgentService(Protocol):
     def delete_agent(self, agent_id: str) -> bool: ...
     def get_runnable_agent(self, agent_id: Optional[str] = None) -> Agent: ...
     async def add_tools(self, agent_id: str, tool_ids: List[str]) -> bool: ...
-    async def remove_tool(self, agent_id: str, tool_id: str) -> bool: ...
+    async def remove_tools(self, agent_id: str, tool_ids: List[str]) -> bool: ...
 
 
 class AgentService(IAgentService):
-    def __init__(self, llm_service: ILlmService, collection: TenantCollection):
+    def __init__(self, llm_service: ILlmService, collection: TenantCollection, tools_collection: Optional[TenantCollection] = None):
         self.llm_service = llm_service
         self.collection = collection
+        self.tools_collection = tools_collection
 
     async def create_agent(self, req: AgentCreateRequest) -> AgentResponse:
         new_agent = AgentDocument(
@@ -178,24 +179,24 @@ class AgentService(IAgentService):
         
         self.collection.update_one(
             {"_id": doc["_id"]},
-            {"$set": {"tools": tool_ids, "updated_at": datetime.utcnow()}}
+            {
+                "$addToSet": {"tools": {"$each": tool_ids}},
+                "$set": {"updated_at": datetime.utcnow()}
+            }
         )
         return True
 
-    async def remove_tool(self, agent_id: str, tool_id: str) -> bool:
+    async def remove_tools(self, agent_id: str, tool_ids: List[str]) -> bool:
         doc = self._get_agent_doc(agent_id)
         if not doc:
             return False
         
-        tools = doc.get("tools", [])
-        if tool_id not in tools:
-            return True
-            
-        new_tools = [t for t in tools if t != tool_id]
-        
         self.collection.update_one(
             {"_id": doc["_id"]},
-            {"$set": {"tools": new_tools, "updated_at": datetime.utcnow()}}
+            {
+                "$pull": {"tools": {"$in": tool_ids}},
+                "$set": {"updated_at": datetime.utcnow()}
+            }
         )
         return True
 
@@ -265,11 +266,25 @@ class AgentService(IAgentService):
         
         system_prompt = self._build_prompt_from_doc(doc)
         
-        tool_names = doc.get("tools", [])
+        tool_ids = doc.get("tools", [])
+        tool_names = []
+        
+        if self.tools_collection and tool_ids:
+            for tid in tool_ids:
+                try:
+                    t_doc = self.tools_collection.find_one({"_id": ObjectId(tid)})
+                    if t_doc:
+                        tool_names.append(t_doc["name"])
+                except Exception:
+                    # Fallback: check if tid is actually the name
+                    t_doc = self.tools_collection.find_one({"name": tid})
+                    if t_doc:
+                        tool_names.append(t_doc["name"])
+
         dynamic_toolsets = get_toolsets_by_names(tool_names)
         
         return Agent(
             model=model,
             instructions=system_prompt,
-            toolsets=[memory_toolset] + dynamic_toolsets
+            toolsets=dynamic_toolsets
         )

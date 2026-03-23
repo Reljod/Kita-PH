@@ -1,6 +1,9 @@
 from fastapi import APIRouter, HTTPException, Depends, Query, BackgroundTasks, status
 from typing import List
-from app.models.agent import AgentCreateRequest, AgentUpdateRequest, AgentResponse
+from app.models.agent import (
+    AgentCreateRequest, AgentUpdateRequest, AgentResponse,
+    AddToolsRequest, RemoveToolsRequest
+)
 from app.models.chat import ChatCreateRequest, ChatResponse, ChatContinueRequest
 from app.models.rag import RagCreateRequest, RagResponse, RagUpdateRequest
 from app.services.agent_service import AgentService, IAgentService
@@ -16,7 +19,8 @@ def get_agent_service(org_id: str = Depends(get_current_org_id)) -> IAgentServic
     llm_service_coll = TenantCollection(db.get_llms_collection(), org_id)
     llm_service = LlmService(llm_service_coll)
     collection = TenantCollection(db.get_agents_collection(), org_id)
-    return AgentService(llm_service=llm_service, collection=collection)
+    tools_collection = TenantCollection(db.get_tools_collection(), org_id)
+    return AgentService(llm_service=llm_service, collection=collection, tools_collection=tools_collection)
 
 @router.post("/", response_model=AgentResponse)
 async def create_agent(
@@ -188,3 +192,37 @@ async def delete_agent_rag(rag_id: str, rag_service: IRagService = Depends(get_a
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error deleting agent memory: {str(e)}")
+
+# Agent Tool Routes
+
+@router.post("/{agent_id}/tools/add", response_model=AgentResponse)
+async def add_agent_tools(
+    agent_id: str,
+    req: AddToolsRequest,
+    service: IAgentService = Depends(get_agent_service)
+):
+    success = await service.add_tools(agent_id, req.tool_ids)
+    if not success:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    
+    # Return updated agent
+    agent = service.get_agent(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    return agent
+
+@router.post("/{agent_id}/tools/remove", response_model=AgentResponse)
+async def remove_agent_tools(
+    agent_id: str,
+    req: RemoveToolsRequest,
+    service: IAgentService = Depends(get_agent_service)
+):
+    success = await service.remove_tools(agent_id, req.tool_ids)
+    if not success:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    
+    # Return updated agent
+    agent = service.get_agent(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    return agent

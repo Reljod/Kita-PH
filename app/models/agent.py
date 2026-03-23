@@ -27,6 +27,12 @@ class AgentUpdateRequest(BaseModel):
     personalities: Optional[List[str]] = None
     tools: Optional[List[str]] = None
 
+class AddToolsRequest(BaseModel):
+    tool_ids: List[str]
+
+class RemoveToolsRequest(BaseModel):
+    tool_ids: List[str]
+
 class AgentResponse(BaseModel):
     id: str
     base_id: Optional[str] = None
