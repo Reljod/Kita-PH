@@ -106,9 +106,10 @@ def build_system_prompt(
     personalities_block = _to_bullets(personalities)
 
     # All agents have the RAG tool by default
+    # Note: Tool descriptions are handled by native tool calling (pydantic-ai),
+    # so we only inject the usage instructions (rules) here.
     default_tools = [
         _TOOLS_INSTRUCTIONS_PATH.read_text(encoding="utf-8").strip(),
-        _MEMORY_TOOL_PATH.read_text(encoding="utf-8").strip(),
     ]
     if tools:
         default_tools.extend(tools)

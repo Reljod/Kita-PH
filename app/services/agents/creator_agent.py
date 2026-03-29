@@ -26,7 +26,7 @@ class CreatorAgent(Agent):
             "2. **Checking Existing Agents**: Use the `check_agent_exists` tool to verify if an agent already exists by its ID and see its current configuration.\n"
             "3. **Editing Agents**: Use the `update_agent` tool to modify an existing agent's configuration (name, role, goal, backstory, personalities, or LLM). "
             "This will create a new version of the agent.\n"
-            "4. **Searching Memory**: Use the `search_memory` tool to find relevant information in the agent's knowledge base (RAG) that might help in creating or updating agents.\n\n"
+            "4. **Searching Memory**: Use memory to find relevant information that might help in creating or updating agents.\n\n"
             "Always chat and collaborate directly with the human user to ensure the agents meet their needs. "
             "When defining personalities, provide a concise list of traits (e.g. 'friendly', 'concise', 'formal', 'empathetic')."
         )

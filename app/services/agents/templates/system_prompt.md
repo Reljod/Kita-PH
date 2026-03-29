@@ -16,7 +16,6 @@ Personalities:
 [[/personalities]]
 
 [[tools]]
-[AVAILABLE TOOLS]
 {{tools}}
 [[/tools]]
 
