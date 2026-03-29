@@ -1,9 +1,9 @@
+import logfire
+import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
-import os
-from langsmith.integrations.otel import configure
 from pydantic_ai import Agent
 
 from app.db import db
@@ -16,11 +16,6 @@ from fastapi import Depends
 load_dotenv(".env.local")
 load_dotenv()
 
-# Configure LangSmith tracing
-configure(project_name=os.getenv("LANGSMITH_PROJECT", "kita_ph"))
-
-# Instrument all PydanticAI agents
-Agent.instrument_all()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -36,6 +31,10 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan
 )
+
+logfire.configure()
+logfire.instrument_pydantic_ai()
+logfire.instrument_fastapi(app)
 
 # Configure CORS
 app.add_middleware(
