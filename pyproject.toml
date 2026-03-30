@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "bcrypt>=5.0.0",
-    "fastapi>=0.135.2",
+    "fastapi[standard]>=0.135.2",
     "httpx>=0.28.1",
     "logfire[fastapi]>=4.31.0",
     "pydantic-ai>=1.0.0",
@@ -17,3 +17,6 @@ dependencies = [
     "torch>=2.11.0",
     "uvicorn>=0.42.0",
 ]
+
+[tool.fastapi]
+entrypoint = "main:app"
