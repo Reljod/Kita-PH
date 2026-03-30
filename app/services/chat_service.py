@@ -56,9 +56,14 @@ class ChatService(IChatService):
         
         messages_dump = to_jsonable_python(result.all_messages())
         
+        from app.models.agent import parse_agent_id
+        base_agent_id = None
+        if agent_id:
+            base_agent_id, _ = parse_agent_id(agent_id)
+            
         new_chat = ChatDocument(
             messages=messages_dump,
-            agent_id=agent_id
+            agent_id=base_agent_id
         )
         
         doc = new_chat.model_dump()
@@ -92,14 +97,19 @@ class ChatService(IChatService):
         # Dump new history
         messages_dump = to_jsonable_python(result.all_messages())
         
+        update_fields = {
+            "messages": messages_dump,
+            "updated_at": datetime.utcnow()
+        }
+        
+        if agent_id:
+            from app.models.agent import parse_agent_id
+            base_agent_id, _ = parse_agent_id(agent_id)
+            update_fields["agent_id"] = base_agent_id
+            
         self.collection.update_one(
             {"_id": obj_id},
-            {
-                "$set": {
-                    "messages": messages_dump,
-                    "updated_at": datetime.utcnow()
-                }
-            }
+            {"$set": update_fields}
         )
         
         updated_chat = self.collection.find_one({"_id": obj_id})
@@ -124,7 +134,9 @@ class ChatService(IChatService):
     def get_all_chats(self, agent_id: Optional[str] = None, preview: bool = False, limit: Optional[int] = None) -> List[ChatResponse]:
         query = {}
         if agent_id:
-            query["agent_id"] = agent_id
+            from app.models.agent import parse_agent_id
+            base_id, _ = parse_agent_id(agent_id)
+            query["agent_id"] = base_id
         
         cursor = self.collection.find(query).sort("updated_at", -1)
         if limit:

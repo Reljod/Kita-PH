@@ -70,7 +70,7 @@ def format_agent_response(doc: dict, system_prompt: Optional[str] = None) -> Age
     formatted_id = f"{base_id}-v{version}" if version > 1 else base_id
 
     return AgentResponse(
-        id=formatted_id,
+        id=base_id,
         base_id=base_id,
         version=version,
         name=doc["name"],
