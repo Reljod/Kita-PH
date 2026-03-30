@@ -63,14 +63,16 @@ async def create_agent(
     return f"Successfully created agent '{name}' with ID: {agent.id}"
 
 @creator_toolset.tool
-async def check_agent_exists(
+async def get_agent(
     ctx: RunContext[dict],
-    agent_id: Annotated[str, Field(description="The ID of the agent to check (e.g., '67bc...-v1' or '67bc...')")]
+    agent_id: Annotated[str, Field(description="The ID of the agent to get (e.g., '67bc...-v1' or '67bc...')")]
 ) -> str:
     """
-    Checks if an agent exists in the database by its ID.
+    Retrieves full information about an agent by its ID, including the LLM model used.
     """
     from app.models.agent import parse_agent_id
+    from app.services.llm_service import LlmService
+
     base_id, version = parse_agent_id(agent_id)
     
     query = {"base_id": base_id}
@@ -84,13 +86,52 @@ async def check_agent_exists(
         return f"Agent with ID '{agent_id}' does not exist."
     
     agent = format_agent_response(doc)
+    
+    # Get LLM info
+    llm_service_coll = TenantCollection(db.get_llms_collection(), org_id)
+    llm_service = LlmService(llm_service_coll)
+    llm = llm_service.get_llm(agent.llm_id)
+    
+    llm_info = f"{llm.name} ({llm.model} via {llm.provider})" if llm else f"Unknown LLM (ID: {agent.llm_id})"
+
     return (
-        f"Agent found: {agent.name}\n"
+        f"Agent: {agent.name}\n"
+        f"ID: {agent.id}\n"
+        f"Base ID: {agent.base_id}\n"
+        f"LLM: {llm_info}\n"
         f"Role: {agent.role}\n"
         f"Goal: {agent.goal}\n"
         f"Backstory: {agent.backstory}\n"
-        f"Personalities: {', '.join(agent.personalities) if agent.personalities else 'None'}"
+        f"Personalities: {', '.join(agent.personalities) if agent.personalities else 'None'}\n"
+        f"Tools: {', '.join(agent.tools) if agent.tools else 'None'}"
     )
+
+@creator_toolset.tool
+async def list_agents(
+    ctx: RunContext[dict]
+) -> str:
+    """
+    Retrieves a list of all existing agents in the organization.
+    """
+    from app.services.agent_service import AgentService
+    from app.services.llm_service import LlmService
+
+    org_id = ctx.deps["org_id"]
+    llm_service_coll = TenantCollection(db.get_llms_collection(), org_id)
+    llm_service = LlmService(llm_service_coll)
+    agent_coll = TenantCollection(db.get_agents_collection(), org_id)
+    
+    service = AgentService(llm_service=llm_service, collection=agent_coll)
+    agents = service.get_all_agents()
+    
+    if not agents:
+        return "No agents found."
+    
+    result = "Existing Agents:\n"
+    for agent in agents:
+        result += f"- {agent.name} (ID: {agent.id}, Base ID: {agent.base_id})\n"
+    
+    return result
 
 @creator_toolset.tool
 async def update_agent(
