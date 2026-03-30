@@ -51,6 +51,10 @@ class Database:
     def get_tools_collection(cls) -> Collection:
         return cls.db["tools"]
 
+    @classmethod
+    def get_files_collection(cls) -> Collection:
+        return cls.db["files"]
+
 db = Database()
 
 from typing import Mapping, Any, Optional
