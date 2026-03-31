@@ -1,7 +1,7 @@
 import os
 import uuid
 from typing import List, Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 from supabase import create_client, Client
 from app.db import TenantCollection
 from app.models.file import FileDocument, FileUploadRequest, FileUploadResponse, FileResponse
@@ -110,6 +110,8 @@ class FileService:
         try:
             self.supabase.storage.from_(self.bucket_name).remove([storage_path])
         except Exception as e:
+            # We log but continue, ensuring DB record is cleaned up 
+            # even if storage is out of sync or file already gone.
             print(f"Error deleting file from Supabase: {e}")
             
         return True
@@ -123,7 +125,7 @@ class FileService:
         if not update_data:
             return self._format_response(doc)
             
-        update_data["updated_at"] = datetime.now(timezone.utc) if hasattr(datetime, "now") else datetime.utcnow()
+        update_data["updated_at"] = datetime.now(timezone.utc)
         
         self.collection.update_one({"id": file_id}, {"$set": update_data})
         

@@ -41,7 +41,6 @@ class FileDocument(BaseModel):
     content_type: Optional[str] = None
     org_id: str
     agent_id: Optional[str] = None
-    agent_id: Optional[str] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
