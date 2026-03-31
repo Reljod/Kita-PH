@@ -78,10 +78,14 @@ class FileService:
 
     async def get_files(self, agent_id: Optional[str] = None) -> List[FileResponse]:
         query = {}
-        if agent_id:
-            query["agent_id"] = agent_id
-        elif self.agent_id:
-            query["agent_id"] = self.agent_id
+        target_agent_id = agent_id or self.agent_id
+        
+        if target_agent_id:
+            # Show agent-specific files AND organization-wide files
+            query["$or"] = [{"agent_id": target_agent_id}, {"agent_id": None}]
+        else:
+            # Show ONLY organization-wide files
+            query["agent_id"] = None
             
         docs = self.collection.find(query).sort("created_at", -1)
         return [self._format_response(doc) for doc in docs]
@@ -109,6 +113,22 @@ class FileService:
             print(f"Error deleting file from Supabase: {e}")
             
         return True
+
+    async def update_file(self, file_id: str, req: Dict[str, Any]) -> Optional[FileResponse]:
+        doc = self.collection.find_one({"id": file_id})
+        if not doc:
+            return None
+            
+        update_data = {k: v for k, v in req.items() if v is not None}
+        if not update_data:
+            return self._format_response(doc)
+            
+        update_data["updated_at"] = datetime.now(timezone.utc) if hasattr(datetime, "now") else datetime.utcnow()
+        
+        self.collection.update_one({"id": file_id}, {"$set": update_data})
+        
+        updated_doc = self.collection.find_one({"id": file_id})
+        return self._format_response(updated_doc)
 
     def _format_response(self, doc: Dict[str, Any]) -> FileResponse:
         return FileResponse(

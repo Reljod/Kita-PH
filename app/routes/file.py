@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends, status, Query, Header
 from typing import List, Optional
-from app.models.file import FileResponse, FileUploadRequest, FileUploadResponse
+from app.models.file import FileResponse, FileUploadRequest, FileUploadResponse, FileUpdateRequest
 from app.services.file_service import FileService
 from app.db import db, TenantCollection
 from app.security import get_current_org_id
@@ -40,6 +40,17 @@ async def get_file(
     file_service: FileService = Depends(get_file_service)
 ):
     file = await file_service.get_file(file_id)
+    if not file:
+        raise HTTPException(status_code=404, detail="File not found")
+    return file
+
+@router.patch("/{file_id}", response_model=FileResponse)
+async def update_file(
+    file_id: str,
+    req: FileUpdateRequest,
+    file_service: FileService = Depends(get_file_service)
+):
+    file = await file_service.update_file(file_id, req.model_dump(exclude_unset=True))
     if not file:
         raise HTTPException(status_code=404, detail="File not found")
     return file

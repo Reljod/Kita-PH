@@ -1,12 +1,17 @@
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import uuid4
 
 class FileUploadRequest(BaseModel):
     filename: str
     size: int
     content_type: Optional[str] = None
+    agent_id: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
+
+class FileUpdateRequest(BaseModel):
+    filename: Optional[str] = None
     agent_id: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
 
@@ -36,6 +41,7 @@ class FileDocument(BaseModel):
     content_type: Optional[str] = None
     org_id: str
     agent_id: Optional[str] = None
+    agent_id: Optional[str] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
