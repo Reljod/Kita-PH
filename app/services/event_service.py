@@ -1,6 +1,6 @@
 from typing import Dict, Any, Protocol, Optional
 import os
-from hatchet_sdk import Hatchet
+from app.workers.hatchet import hatchet
 
 class IEventService(Protocol):
     async def push(self, event_key: str, payload: Dict[str, Any]):
@@ -13,7 +13,8 @@ class HatchetEventService(IEventService):
             print("HATCHET_CLIENT_TOKEN not set. Events will not be pushed.")
             self.client = None
         else:
-            self.client = Hatchet()
+            # Use the shared hatchet client
+            self.client = hatchet
 
     async def push(self, event_key: str, payload: Dict[str, Any]):
         if not self.client:

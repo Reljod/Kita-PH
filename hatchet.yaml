@@ -1,0 +1,12 @@
+dev:
+  preCmds: ["uv pip install -e ."]
+  runCmd: "python -m app.workers.worker"
+  files:
+    - "app/**/*.py"
+    - "!**/__pycache__/**"
+    - "!.venv/**"
+  reload: true
+triggers:
+  - name: "simple"
+    command: "python -m app.workers.run"
+    description: "Trigger a simple workflow"
