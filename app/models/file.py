@@ -1,7 +1,13 @@
 from pydantic import BaseModel, Field
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone
+from enum import Enum
 from uuid import uuid4
+
+class FileStatus(str, Enum):
+    PENDING = "pending"
+    COMPLETED = "completed"
+    FAILED = "failed"
 
 class FileUploadRequest(BaseModel):
     filename: str
@@ -14,6 +20,10 @@ class FileUpdateRequest(BaseModel):
     filename: Optional[str] = None
     agent_id: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
+    status: Optional[FileStatus] = None
+
+class BatchFileCompleteRequest(BaseModel):
+    file_ids: List[str]
 
 class FileUploadResponse(BaseModel):
     file_id: str
@@ -30,6 +40,7 @@ class FileResponse(BaseModel):
     org_id: str
     agent_id: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
+    status: FileStatus
     created_at: datetime
     updated_at: datetime
 
@@ -42,5 +53,6 @@ class FileDocument(BaseModel):
     org_id: str
     agent_id: Optional[str] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
+    status: FileStatus = FileStatus.PENDING
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

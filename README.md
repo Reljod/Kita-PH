@@ -33,7 +33,7 @@ The API provides two methods for file uploads based on the file size.
 ### 1. Initiate Upload
 Send a `POST` request to `/files/upload` with the file metadata:
 ```bash
-curl -X POST "http://localhost:8080/files/upload" \
+curl -X POST "http://localhost:8000/files/upload" \
   -H "Authorization: Bearer <your_auth_token>" \
   -H "Content-Type: application/json" \
   -d '{
