@@ -172,6 +172,19 @@ class FileService:
                 results.append(res)
         return results
 
+    async def download_file(self, file_id: str) -> bytes:
+        doc = self.collection.find_one({"id": file_id})
+        if not doc:
+            raise ValueError(f"File {file_id} not found")
+            
+        extension = doc.get("extension", "")
+        storage_path = f"{file_id}.{extension}" if extension else file_id
+        
+        try:
+            return self.supabase.storage.from_(self.bucket_name).download(storage_path)
+        except Exception as e:
+            raise RuntimeError(f"Failed to download file from storage: {str(e)}")
+
     def _format_response(self, doc: Dict[str, Any]) -> FileResponse:
         return FileResponse(
             id=doc["id"],

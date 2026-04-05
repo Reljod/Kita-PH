@@ -1558,6 +1558,7 @@ dependencies = [
     { name = "fastapi", extra = ["standard"] },
     { name = "hatchet-sdk" },
     { name = "httpx" },
+    { name = "llama-cloud" },
     { name = "logfire", extra = ["fastapi"] },
     { name = "pydantic-ai" },
     { name = "pymongo" },
@@ -1576,6 +1577,7 @@ requires-dist = [
     { name = "fastapi", extras = ["standard"], specifier = ">=0.135.2" },
     { name = "hatchet-sdk", specifier = ">=0.6.0" },
     { name = "httpx", specifier = ">=0.28.1" },
+    { name = "llama-cloud", specifier = ">=2.2.0" },
     { name = "logfire", extras = ["fastapi"], specifier = ">=4.31.0" },
     { name = "pydantic-ai", specifier = ">=1.0.0" },
     { name = "pymongo", extras = ["srv"], specifier = ">=4.16.0" },
@@ -1586,6 +1588,23 @@ requires-dist = [
     { name = "supabase", specifier = ">=2.28.3" },
     { name = "torch", specifier = ">=2.11.0" },
     { name = "uvicorn", specifier = ">=0.42.0" },
+]
+
+[[package]]
+name = "llama-cloud"
+version = "2.2.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "anyio" },
+    { name = "distro" },
+    { name = "httpx" },
+    { name = "pydantic" },
+    { name = "sniffio" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/68/35/06c0ca5aeee0fb9eef1a1959c80f25e3b47e0add0e4aeda19872c4f40e4c/llama_cloud-2.2.0.tar.gz", hash = "sha256:67d7f8aba4bbe522cbafb8e2804de385e416389f5e2fa98ddd371ed7b7389449", size = 3531069, upload-time = "2026-04-03T21:56:06.299Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/54/4f/178b6a0cb66bd8ece976d7ede8833ea017f40e10b051f7dbfdaec557564b/llama_cloud-2.2.0-py3-none-any.whl", hash = "sha256:245ec558b2b203d607cb18664a877a24d4a529639f2627681db33a18bcb06452", size = 418227, upload-time = "2026-04-03T21:56:04.61Z" },
 ]
 
 [[package]]

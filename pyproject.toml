@@ -19,4 +19,5 @@ dependencies = [
     "torch>=2.11.0",
     "uvicorn>=0.42.0",
     "hatchet-sdk>=0.6.0",
+    "llama-cloud>=2.2.0",
 ]
