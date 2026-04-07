@@ -46,15 +46,37 @@ def format_chat_response(doc: Dict[str, Any], preview_only: bool = False) -> Cha
     )
 
 class ChatService(IChatService):
-    def __init__(self, agent_service: IAgentService, collection: TenantCollection):
+    def __init__(
+        self, 
+        agent_service: IAgentService, 
+        collection: TenantCollection,
+        file_service: Optional[Any] = None,
+        parse_service: Optional[Any] = None,
+        graph_rag_service: Optional[Any] = None
+    ):
         self.agent_service = agent_service
         self.collection = collection
+        self.file_service = file_service
+        self.parse_service = parse_service
+        self.graph_rag_service = graph_rag_service
+
+    def _get_deps(self, agent_id: Optional[str]) -> Dict[str, Any]:
+        return {
+            "org_id": self.collection.org_id, 
+            "agent_id": agent_id, 
+            "agent_service": self.agent_service,
+            "file_service": self.file_service,
+            "parse_service": self.parse_service,
+            "graph_rag_service": self.graph_rag_service
+        }
 
     async def create_chat(self, req: ChatCreateRequest, agent_id: Optional[str] = None) -> ChatResponse:
         agent = self.agent_service.get_runnable_agent(agent_id=agent_id)
-        result = await agent.run(req.message, deps={"org_id": self.collection.org_id, "agent_id": agent_id, "agent_service": self.agent_service})
+        result = await agent.run(req.message, deps=self._get_deps(agent_id))
         
         messages_dump = to_jsonable_python(result.all_messages())
+        
+        # Determine the agent's actual ID (system agents might have static IDs)
         
         from app.models.agent import parse_agent_id
         base_agent_id = None
@@ -92,7 +114,7 @@ class ChatService(IChatService):
         # Load history
         message_history = ModelMessagesTypeAdapter.validate_python(chat["messages"])
         
-        result = await agent.run(req.message, message_history=message_history, deps={"org_id": self.collection.org_id, "agent_id": agent_to_run_with, "agent_service": self.agent_service})
+        result = await agent.run(req.message, message_history=message_history, deps=self._get_deps(agent_to_run_with))
         
         # Dump new history
         messages_dump = to_jsonable_python(result.all_messages())

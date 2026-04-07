@@ -29,15 +29,10 @@ async def delegate_task(
     try:
         sub_agent = agent_service.get_runnable_agent(agent_id=actual_agent_id)
         # Run sub-agent with the provided task.
-        # We pass the same deps structure to allow further nesting.
-        # Passing ctx.usage allows pydantic-ai to aggregate token counts across agents.
+        # We pass the full deps from ctx.deps to allow nested agents access to all tools (RAG, etc.)
         result = await sub_agent.run(
             task_description, 
-            deps={
-                "org_id": ctx.deps.get("org_id"), 
-                "agent_id": actual_agent_id,
-                "agent_service": agent_service
-            },
+            deps=ctx.deps,
             usage=ctx.usage
         )
         return str(result.output)

@@ -16,6 +16,12 @@ class IParseService(Protocol):
         Parses a file and returns the result.
         """
         ...
+    
+    async def get_latest_parse(self, file_id: str) -> Optional[FileParseRecord]:
+        """
+        Fetches the most recent parse record for a file.
+        """
+        ...
 
 class LlamaParseService(IParseService):
     def __init__(
@@ -106,3 +112,9 @@ class LlamaParseService(IParseService):
         })
 
         return parse_record.model_dump()
+
+    async def get_latest_parse(self, file_id: str) -> Optional[FileParseRecord]:
+        doc = self.parse_collection.find_one({"file_id": file_id}, sort=[("created_at", -1)])
+        if not doc:
+            return None
+        return FileParseRecord(**doc)

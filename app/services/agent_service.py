@@ -244,8 +244,13 @@ class AgentService(IAgentService):
             agent_def = SYSTEM_AGENTS[agent_id]
             # Creator agent has special logic
             if agent_id == "agent-creator":
-                from app.services.agents.creator_agent import CreatorAgent
+                from app.services.agents.creator_agent.agent import CreatorAgent
                 return CreatorAgent()
+            
+            # Rag Manager agent has special logic
+            if agent_id == "rag-manager":
+                from app.services.agents.rag_manager_agent.agent import RagManagerAgent
+                return RagManagerAgent()
             
             # Others use the standard template
             model_name = agent_def.llm_id or os.getenv("LLM_MODEL", "x-ai/grok-4.1-fast")

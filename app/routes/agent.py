@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException, Depends, Query, BackgroundTasks, status
+import os
 from typing import List
 from app.models.agent import (
     AgentCreateRequest, AgentUpdateRequest, AgentResponse,
@@ -9,6 +10,10 @@ from app.models.rag import RagCreateRequest, RagResponse, RagUpdateRequest
 from app.services.agent_service import AgentService, IAgentService
 from app.services.chat_service import ChatService, IChatService
 from app.services.rag_service import MongoVectorDbRagService, IRagService
+from app.services.file_service import FileService
+from app.services.parse_service import LlamaParseService
+from app.services.graph_rag_service import Neo4JGraphRagService
+from app.services.event_service import HatchetEventService
 from app.services.llm_service import LlmService
 from app.db import db, TenantCollection
 from app.security import get_current_org_id
@@ -67,7 +72,29 @@ def get_chat_service(
     agent_service: IAgentService = Depends(get_agent_service)
 ) -> IChatService:
     collection = TenantCollection(db.get_chats_collection(), org_id)
-    return ChatService(agent_service, collection)
+    
+    # Resolve RAG dependencies
+    event_service = HatchetEventService()
+    
+    file_coll = TenantCollection(db.get_files_collection(), org_id)
+    file_service = FileService(file_coll, org_id, event_service)
+    
+    parse_coll = TenantCollection(db.get_file_parse_collection(), org_id)
+    parse_service = LlamaParseService(parse_coll, file_service, event_service)
+    
+    # Graph RAG from environment
+    neo4j_uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
+    neo4j_user = os.getenv("NEO4J_USER", "neo4j")
+    neo4j_password = os.getenv("NEO4J_PASSWORD", "password")
+    graph_service = Neo4JGraphRagService(neo4j_uri, neo4j_user, neo4j_password, org_id)
+    
+    return ChatService(
+        agent_service=agent_service, 
+        collection=collection,
+        file_service=file_service,
+        parse_service=parse_service,
+        graph_rag_service=graph_service
+    )
 
 @router.post("/{agent_id}/chat", response_model=ChatResponse)
 async def create_agent_chat(agent_id: str, req: ChatCreateRequest, chat_service: IChatService = Depends(get_chat_service)):

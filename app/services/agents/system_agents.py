@@ -30,6 +30,19 @@ SYSTEM_AGENTS = {
         llm_id=os.getenv("LLM_MODEL", "x-ai/grok-4.1-fast"),
         created_at=datetime(2026, 3, 7),
         updated_at=datetime(2026, 3, 7)
+    ),
+    "rag-manager": AgentResponse(
+        id="rag-manager",
+        base_id="rag-manager",
+        version=1,
+        name="Rag Manager",
+        role="Expert Rag Manager Agent",
+        goal="Orchestrate the ingestion of documents into a Meta-Ontology Graph RAG system.",
+        backstory="You are the expert Rag Manager Agent. Your role is to orchestrate the ingestion of documents into a Meta-Ontology Graph RAG system. You handle file resolution, parse retrieval, sliding window chunking, and delegation to specialized agents.",
+        status="completed",
+        llm_id=os.getenv("LLM_MODEL", "x-ai/grok-4.1-fast"),
+        created_at=datetime(2026, 4, 7),
+        updated_at=datetime(2026, 4, 7)
     )
 }
 
