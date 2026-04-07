@@ -33,6 +33,8 @@ class LlamaParseService(IParseService):
             raise ValueError("LLAMA_CLOUD_API_KEY must be set")
             
         self.client = LlamaCloud(api_key=api_key)
+        self.tier = "cost_effective"
+        self.version = "latest"
 
     async def parse_file(self, file_id: str, org_id: str) -> Dict[str, Any]:
         # Get file metadata
@@ -55,14 +57,21 @@ class LlamaParseService(IParseService):
                 
                 result = self.client.parsing.parse(
                     upload_file=tmp.name,
-                    tier="agentic",
-                    version="latest",
+                    tier=self.tier,
+                    version=self.version,
                     processing_options={
                         "ignore": {
                             "ignore_diagonal_text": True
                         }
                     },
-                    expand=["markdown", "text"]
+                    output_options={
+                        "markdown": {
+                            "tables": {
+                                "merge_continued_tables": True
+                            }
+                        }
+                    },
+                    expand=["markdown", "text", "items"]
                 )
         except Exception as e:
             raise RuntimeError(f"LlamaParse call failed: {str(e)}")
@@ -82,8 +91,8 @@ class LlamaParseService(IParseService):
             result=parse_result,
             metadata={
                 "parser": "llama_parse_v2",
-                "tier": "agentic",
-                "version": "latest"
+                "tier": self.tier,
+                "version": self.version
             }
         )
         
