@@ -1,4 +1,5 @@
 import uuid
+import logfire
 from pydantic_ai import FunctionToolset, RunContext
 from pydantic import Field
 from typing import Annotated, Dict, Any, List, Optional
@@ -95,4 +96,9 @@ async def ingest_into_graph(
         
         return f"Successfully ingested {len(graph_chunks)} chunks, {len(graph_entities)} entities, and {len(graph_relationships)} relationships."
     except Exception as e:
-        return f"Error during ingestion: {str(e)}"
+        error_msg = str(e)
+        logfire.error("Error during graph ingestion: {error}", error=error_msg)
+        # Check if error contains sensitivity (common for Neo4j context errors)
+        if "bolt://" in error_msg or "neo4j" in error_msg.lower():
+            return "Error during ingestion: Authentication or connection failure. Please check Graph RAG configuration."
+        return f"Error during ingestion: {error_msg}"

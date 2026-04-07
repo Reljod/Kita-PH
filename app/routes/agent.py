@@ -84,7 +84,7 @@ def get_chat_service(
     
     # Graph RAG from environment
     neo4j_uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
-    neo4j_user = os.getenv("NEO4J_USER", "neo4j")
+    neo4j_user = os.getenv("NEO4J_USERNAME") or os.getenv("NEO4J_USER", "neo4j")
     neo4j_password = os.getenv("NEO4J_PASSWORD", "password")
     graph_service = Neo4JGraphRagService(neo4j_uri, neo4j_user, neo4j_password, org_id)
     
