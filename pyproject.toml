@@ -20,4 +20,5 @@ dependencies = [
     "uvicorn>=0.42.0",
     "hatchet-sdk>=0.6.0",
     "llama-cloud>=2.2.0",
+    "neo4j>=6.1.0",
 ]

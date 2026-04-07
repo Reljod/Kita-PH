@@ -1,0 +1,280 @@
+import os
+import json
+import asyncio
+from typing import List, Optional, Dict, Any, Protocol
+from neo4j import GraphDatabase, AsyncGraphDatabase
+from datetime import datetime
+import logfire
+
+from app.models.graph_rag import (
+    GraphNode, GraphRelationship, GraphDocument, 
+    GraphChunk, GraphEntity, GraphConcept, GraphRagSearchResult
+)
+
+class GraphRagService(Protocol):
+    async def ingest_document(self, doc: GraphDocument, chunks: List[GraphChunk]) -> bool:
+        ...
+    
+    async def add_entities_and_relationships(
+        self, 
+        entities: List[GraphEntity], 
+        relationships: List[GraphRelationship],
+        chunk_ids: Optional[List[str]] = None
+    ) -> bool:
+        ...
+
+    async def query(self, query_text: str, org_id: str, limit: int = 5) -> List[GraphRagSearchResult]:
+        ...
+
+    async def upsert_node(self, label: str, properties: Dict[str, Any]) -> str:
+        ...
+
+    async def upsert_relationship(
+        self, 
+        source_id: str, 
+        target_id: str, 
+        rel_type: str, 
+        properties: Dict[str, Any]
+    ) -> bool:
+        ...
+
+class Neo4JGraphRagService:
+    def __init__(self, uri: str, user: str, password: str, org_id: str):
+        self.uri = uri
+        self.user = user
+        self.password = password
+        self.org_id = org_id
+        self.driver = AsyncGraphDatabase.driver(uri, auth=(user, password))
+        self._model = None
+
+    def _prepare_props(self, props: Dict[str, Any]) -> Dict[str, Any]:
+        """Serializes complex types for Neo4j storage."""
+        cleaned = {}
+        for k, v in props.items():
+            if isinstance(v, (dict, list)) and not all(isinstance(x, (int, float, str, bool)) for x in (v if isinstance(v, list) else [])):
+                cleaned[k] = json.dumps(v)
+            else:
+                cleaned[k] = v
+        return cleaned
+
+    @property
+    def model(self):
+        if self._model is None:
+            from sentence_transformers import SentenceTransformer
+            self._model = SentenceTransformer('all-MiniLM-L6-v2')
+        return self._model
+
+    async def close(self):
+        await self.driver.close()
+
+    async def initialize_schema(self):
+        """Sets up constraints and indexes."""
+        async with self.driver.session() as session:
+            # Constraints for unique IDs per organization
+            constraints = [
+                "CREATE CONSTRAINT document_id_org IF NOT EXISTS FOR (d:Document) REQUIRE (d.id, d.org_id) IS UNIQUE",
+                "CREATE CONSTRAINT chunk_id_org IF NOT EXISTS FOR (c:Chunk) REQUIRE (c.id, c.org_id) IS UNIQUE",
+                "CREATE CONSTRAINT entity_id_org IF NOT EXISTS FOR (e:Entity) REQUIRE (e.id, e.org_id) IS UNIQUE",
+                "CREATE CONSTRAINT concept_id_org IF NOT EXISTS FOR (co:Concept) REQUIRE (co.id, co.org_id) IS UNIQUE",
+            ]
+            for c in constraints:
+                await session.run(c)
+            
+            # Indexes
+            indexes = [
+                "CREATE INDEX entity_name_org IF NOT EXISTS FOR (e:Entity) ON (e.name, e.org_id)",
+                "CREATE INDEX chunk_org_id IF NOT EXISTS FOR (c:Chunk) ON (c.org_id)",
+            ]
+            for i in indexes:
+                await session.run(i)
+
+            # Vector Index (Requires Neo4j 5.11+)
+            # Note: dimension should match the embedding model (e.g., 384 for all-MiniLM-L6-v2)
+            # Defaulting to 384 but this can be parameterized
+            try:
+                await session.run("""
+                    CREATE VECTOR INDEX chunk_embeddings IF NOT EXISTS
+                    FOR (c:Chunk) ON (c.embedding)
+                    OPTIONS {indexConfig: {
+                      `vector.dimensions`: 384,
+                      `vector.similarity_function`: 'cosine'
+                    }}
+                """)
+            except Exception as e:
+                logfire.error(f"Failed to create vector index: {e}")
+
+    async def ingest_document(self, doc: GraphDocument, chunks: List[GraphChunk]) -> bool:
+        async with self.driver.session() as session:
+            # Create Document Node
+            await session.run("""
+                MERGE (d:Document {id: $doc_id, org_id: $org_id})
+                SET d.title = $title, d.metadata = $metadata, d.updated_at = datetime()
+            """, doc_id=doc.id, org_id=self.org_id, title=doc.title, metadata=json.dumps(doc.metadata))
+
+            # Create Chunks and link to Document
+            for chunk in chunks:
+                await session.run("""
+                    MERGE (c:Chunk {id: $chunk_id, org_id: $org_id})
+                    SET c.content = $content, c.embedding = $embedding, c.metadata = $metadata
+                    WITH c
+                    MATCH (d:Document {id: $doc_id, org_id: $org_id})
+                    MERGE (d)-[:HAS_CHUNK]->(c)
+                """, 
+                chunk_id=chunk.id, 
+                org_id=self.org_id, 
+                content=chunk.content, 
+                embedding=chunk.embedding, 
+                metadata=json.dumps(chunk.metadata),
+                doc_id=doc.id)
+            
+            return True
+
+    async def add_entities_and_relationships(
+        self, 
+        entities: List[GraphEntity], 
+        relationships: List[GraphRelationship],
+        chunk_ids: Optional[List[str]] = None
+    ) -> bool:
+        async with self.driver.session() as session:
+            # Create Entities
+            for ent in entities:
+                await session.run("""
+                    MERGE (e:Entity {id: $entity_id, org_id: $org_id})
+                    SET e.name = $name, e.type = $type, e.description = $description, e.properties = $properties
+                """, 
+                entity_id=ent.id, 
+                org_id=self.org_id, 
+                name=ent.name, 
+                type=ent.type, 
+                description=ent.description,
+                properties=json.dumps(ent.properties))
+
+                # Link to chunks if provided
+                if chunk_ids:
+                    for cid in chunk_ids:
+                        await session.run("""
+                            MATCH (e:Entity {id: $entity_id, org_id: $org_id})
+                            MATCH (c:Chunk {id: $chunk_id, org_id: $org_id})
+                            MERGE (c)-[:MENTIONS]->(e)
+                        """, entity_id=ent.id, chunk_id=cid, org_id=self.org_id)
+
+            # Create Relationships
+            for rel in relationships:
+                await session.run("""
+                    MATCH (s:Entity {id: $source_id, org_id: $org_id})
+                    MATCH (t:Entity {id: $target_id, org_id: $org_id})
+                    MERGE (s)-[r:RELATED_TO {type: $rel_type, org_id: $org_id}]->(t)
+                    SET r += $properties
+                """, 
+                source_id=rel.source_id, 
+                target_id=rel.target_id, 
+                rel_type=rel.rel_type, 
+                org_id=self.org_id, 
+                properties=self._prepare_props(rel.properties))
+
+            return True
+
+    async def query(self, query_text: str, limit: int = 5) -> List[GraphRagSearchResult]:
+        """
+        Hybrid search: 
+        1. Find relevant chunks via vector search.
+        2. Travevrse graph from chunks to entities and neighbors.
+        3. Collect context and return.
+        """
+        # Calculate embedding
+        loop = asyncio.get_event_loop()
+        query_embedding = await loop.run_in_executor(None, self.model.encode, query_text)
+        query_embedding = query_embedding.tolist()
+
+        results = []
+        async with self.driver.session() as session:
+            # Step 1 & 2: Vector search + graph traversal
+            cypher = """
+            CALL db.index.vector.queryNodes('chunk_embeddings', $limit, $embedding)
+            YIELD node AS chunk, score
+            WHERE chunk.org_id = $org_id
+            
+            // Get mentioned entities
+            OPTIONAL MATCH (chunk)-[:MENTIONS]->(entity:Entity)
+            
+            // Get related entities (1-hop)
+            OPTIONAL MATCH (entity)-[r:RELATED_TO]-(neighbor:Entity)
+            
+            RETURN 
+                chunk.content AS content,
+                score,
+                chunk.metadata AS metadata,
+                collect(DISTINCT {id: entity.id, label: 'Entity', properties: entity {.*}}) AS entities,
+                collect(DISTINCT {id: neighbor.id, label: 'Entity', properties: neighbor {.*}}) AS neighbors
+            """
+            
+            res = await session.run(cypher, embedding=query_embedding, limit=limit, org_id=self.org_id)
+            async for record in res:
+                # Combine nodes for the result
+                nodes = []
+                for n in record["entities"] + record["neighbors"]:
+                    if n.get("id"):
+                        # Deserialize properties if they are JSON strings
+                        raw_props = n["properties"] or {}
+                        props = {}
+                        for pk, pv in raw_props.items():
+                            if isinstance(pv, str) and (pv.startswith("{") or pv.startswith("[")):
+                                try:
+                                    props[pk] = json.loads(pv)
+                                except:
+                                    props[pk] = pv
+                            else:
+                                props[pk] = pv
+                        
+                        nodes.append(GraphNode(id=n["id"], label=n["label"], properties=props))
+                
+                # Deserialize metadata
+                raw_metadata = record["metadata"]
+                metadata = {}
+                if isinstance(raw_metadata, str):
+                    try:
+                        metadata = json.loads(raw_metadata)
+                    except:
+                        metadata = {"raw": raw_metadata}
+                elif isinstance(raw_metadata, dict):
+                    metadata = raw_metadata
+
+                results.append(GraphRagSearchResult(
+                    content=record["content"],
+                    score=record["score"],
+                    metadata=metadata,
+                    nodes=nodes
+                ))
+        
+        return results
+
+    async def upsert_node(self, label: str, properties: Dict[str, Any]) -> str:
+        if "id" not in properties:
+            raise ValueError("Node properties must include 'id'")
+        
+        async with self.driver.session() as session:
+            # Note: Using string formatting for labels as they can't be parameterized in Cypher MERGE
+            # We trust the label source here but should normally validate against a whitelist
+            query = f"MERGE (n:{label} {{id: $id, org_id: $org_id}}) SET n += $props RETURN n.id"
+            res = await session.run(query, id=properties["id"], org_id=self.org_id, props=self._prepare_props(properties))
+            record = await res.single()
+            return record[0]
+
+    async def upsert_relationship(
+        self, 
+        source_id: str, 
+        target_id: str, 
+        rel_type: str, 
+        properties: Dict[str, Any]
+    ) -> bool:
+        async with self.driver.session() as session:
+            query = f"""
+                MATCH (s {{id: $source_id, org_id: $org_id}})
+                MATCH (t {{id: $target_id, org_id: $org_id}})
+                MERGE (s)-[r:{rel_type}]->(t)
+                SET r += $props
+                RETURN count(r)
+            """
+            res = await session.run(query, source_id=source_id, target_id=target_id, org_id=self.org_id, props=self._prepare_props(properties))
+            record = await res.single()
+            return record[0] > 0
