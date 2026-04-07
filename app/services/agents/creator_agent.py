@@ -6,6 +6,7 @@ from pydantic_ai.providers.openrouter import OpenRouterProvider
 from app.services.tools.agent_creation_tools import creator_toolset
 from app.services.tools.memory_tools import memory_toolset
 from app.services.tools.llm_tools import llm_toolset
+from app.services.tools.delegation_tools import delegation_toolset
 
 
 class CreatorAgent(Agent):
@@ -38,5 +39,5 @@ class CreatorAgent(Agent):
         super().__init__(
             model=model,
             instructions=instructions,
-            toolsets=[creator_toolset, memory_toolset, llm_toolset]
+            toolsets=[creator_toolset, memory_toolset, llm_toolset, delegation_toolset]
         )

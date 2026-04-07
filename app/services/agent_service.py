@@ -14,6 +14,7 @@ from app.services.llm_service import ILlmService
 from app.services.agents.system_agents import SYSTEM_AGENTS, BASE_AGENT
 from app.services.agents.templates.system_prompt import build_system_prompt
 from app.services.tools.memory_tools import memory_toolset
+from app.services.tools.delegation_tools import delegation_toolset
 from app.services.tools import get_toolsets_by_names
 from app.db import TenantCollection
 
@@ -236,7 +237,7 @@ class AgentService(IAgentService):
             return Agent(
                 model=model,
                 instructions=instructions,
-                toolsets=[memory_toolset]
+                toolsets=[memory_toolset, delegation_toolset]
             )
             
         if agent_id in SYSTEM_AGENTS:
@@ -263,7 +264,7 @@ class AgentService(IAgentService):
             return Agent(
                 model=model,
                 instructions=instructions,
-                toolsets=[memory_toolset]
+                toolsets=[memory_toolset, delegation_toolset]
             )
 
         doc = self._get_agent_doc(agent_id)
@@ -302,5 +303,5 @@ class AgentService(IAgentService):
         return Agent(
             model=model,
             instructions=system_prompt,
-            toolsets=dynamic_toolsets
+            toolsets=dynamic_toolsets + [delegation_toolset]
         )
