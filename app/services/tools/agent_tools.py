@@ -5,37 +5,38 @@ from typing import Annotated, Optional, List
 agent_toolset = FunctionToolset()
 
 @agent_toolset.tool
-async def find_specialized_agent(
-    ctx: RunContext[dict],
-    document_type_hint: Annotated[str, Field(description="The type of document or content (e.g., 'financial report', 'technical manual')")]
-) -> str:
+async def get_available_agents(
+    ctx: RunContext[dict]
+) -> List[dict]:
     """
-    Searches for a specialized agent in the organization that matches the content type.
-    If no specialized agent is found, returns the ID of the current agent to handle the task normally.
+    Returns a list of all available specialized agents in the organization.
+    Each agent includes its 'id', 'name', 'role', and 'goal'.
+    Use this to identify which agent is best suited for a specific sub-task.
     """
     from app.services.agent_service import IAgentService
     
     agent_service: IAgentService = ctx.deps.get("agent_service")
     if not agent_service:
-        return "Error: Agent service not found in dependencies."
+        return [{"error": "Agent service not found in dependencies."}]
     
-    current_agent_id = ctx.deps.get("agent_id", "rag-manager")
+    current_agent_id = ctx.deps.get("agent_id")
     
     try:
         all_agents = agent_service.get_all_agents()
-        # Search for agents that are NOT system agents and match the hint
-        # We can perform a simple string match on role, goal, or backstory
-        hint_lower = document_type_hint.lower()
+        available_agents = []
         
         for agent in all_agents:
-            # Skip system agents (except if they are specifically relevant, but usually we want user-created ones)
-            if agent.id.startswith("agent-") or agent.id == "kita-assistant":
+            # Skip the current agent to avoid infinite delegation loops
+            if agent.id == current_agent_id:
                 continue
                 
-            match_str = f"{agent.role} {agent.goal} {agent.backstory}".lower()
-            if hint_lower in match_str:
-                return agent.id
+            available_agents.append({
+                "id": agent.id,
+                "name": agent.name,
+                "role": agent.role,
+                "goal": agent.goal
+            })
         
-        return current_agent_id
+        return available_agents
     except Exception as e:
-        return f"Error finding specialized agent: {str(e)}. Falling back to '{current_agent_id}'."
+        return [{"error": f"Error fetching available agents: {str(e)}"}]
