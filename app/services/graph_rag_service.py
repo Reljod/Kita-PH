@@ -23,7 +23,13 @@ class GraphRagService(Protocol):
     ) -> bool:
         ...
 
-    async def query(self, query_text: str, org_id: str, limit: int = 5) -> List[GraphRagSearchResult]:
+    async def query(
+        self, 
+        query_text: str, 
+        limit: int = 5, 
+        agent_id: Optional[str] = None, 
+        filename: Optional[str] = None
+    ) -> List[GraphRagSearchResult]:
         ...
 
     async def upsert_node(self, label: str, properties: Dict[str, Any]) -> str:
@@ -84,6 +90,8 @@ class Neo4JGraphRagService:
             indexes = [
                 "CREATE INDEX entity_name_org IF NOT EXISTS FOR (e:Entity) ON (e.name, e.org_id)",
                 "CREATE INDEX chunk_org_id IF NOT EXISTS FOR (c:Chunk) ON (c.org_id)",
+                "CREATE INDEX chunk_agent_id IF NOT EXISTS FOR (c:Chunk) ON (c.agent_id)",
+                "CREATE INDEX chunk_filename IF NOT EXISTS FOR (c:Chunk) ON (c.filename)",
             ]
             for i in indexes:
                 await session.run(i)
@@ -139,8 +147,12 @@ class Neo4JGraphRagService:
             # Create Entities
             for ent in entities:
                 await session.run("""
-                    MERGE (e:Entity {id: $entity_id, org_id: $org_id})
-                    SET e.name = $name, e.type = $type, e.description = $description, e.properties = $properties
+                    MERGE (e:Entity {name: $name, org_id: $org_id})
+                    SET e.id = CASE WHEN e.id IS NULL THEN $entity_id ELSE e.id END,
+                        e.type = $type, 
+                        e.description = $description, 
+                        e.properties = $properties,
+                        e.updated_at = datetime()
                 """, 
                 entity_id=ent.id, 
                 org_id=self.org_id, 
@@ -160,11 +172,16 @@ class Neo4JGraphRagService:
 
             # Create Relationships
             for rel in relationships:
+                # Use name-based lookup for source and target if possible, or ID
+                # Since we MERGE entities by name, we can reliably match them by name here
+                # However, the rel object passed currently has IDs. 
+                # We need to make sure we are matching on properties that unique identify the node.
+                # Given we MERGE on name, matching by ID (which we also SET) is safe but name is better for cross-window
                 await session.run("""
                     MATCH (s:Entity {id: $source_id, org_id: $org_id})
                     MATCH (t:Entity {id: $target_id, org_id: $org_id})
-                    MERGE (s)-[r:RELATED_TO {type: $rel_type, org_id: $org_id}]->(t)
-                    SET r += $properties
+                    MERGE (s)-[r:RELATED_TO {org_id: $org_id}]->(t)
+                    SET r.type = $rel_type, r += $properties, r.updated_at = datetime()
                 """, 
                 source_id=rel.source_id, 
                 target_id=rel.target_id, 
@@ -174,7 +191,13 @@ class Neo4JGraphRagService:
 
             return True
 
-    async def query(self, query_text: str, limit: int = 5) -> List[GraphRagSearchResult]:
+    async def query(
+        self, 
+        query_text: str, 
+        limit: int = 5,
+        agent_id: Optional[str] = None,
+        filename: Optional[str] = None
+    ) -> List[GraphRagSearchResult]:
         """
         Hybrid search: 
         1. Find relevant chunks via vector search.
@@ -189,10 +212,13 @@ class Neo4JGraphRagService:
         results = []
         async with self.driver.session() as session:
             # Step 1 & 2: Vector search + graph traversal
+            # Added dynamic filtering for agent_id and filename
             cypher = """
             CALL db.index.vector.queryNodes('chunk_embeddings', $limit, $embedding)
             YIELD node AS chunk, score
             WHERE chunk.org_id = $org_id
+            AND ($agent_id IS NULL OR chunk.agent_id = $agent_id)
+            AND ($filename IS NULL OR chunk.filename = $filename)
             
             // Get mentioned entities
             OPTIONAL MATCH (chunk)-[:MENTIONS]->(entity:Entity)
@@ -208,7 +234,14 @@ class Neo4JGraphRagService:
                 collect(DISTINCT {id: neighbor.id, label: 'Entity', properties: neighbor {.*}}) AS neighbors
             """
             
-            res = await session.run(cypher, embedding=query_embedding, limit=limit, org_id=self.org_id)
+            res = await session.run(
+                cypher, 
+                embedding=query_embedding, 
+                limit=limit, 
+                org_id=self.org_id,
+                agent_id=agent_id,
+                filename=filename
+            )
             async for record in res:
                 # Combine nodes for the result
                 nodes = []

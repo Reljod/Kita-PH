@@ -35,6 +35,37 @@ async def delegate_task(
             deps=ctx.deps,
             usage=ctx.usage
         )
-        return str(result.output)
+        
+        # Attempt to parse as JSON if it's a string, to return structured data to the parent
+        output = result.output
+        if isinstance(output, str):
+            import json
+            import re
+            import logfire
+            
+            # Remove potential markdown code blocks
+            clean_output = re.sub(r'```json\s*(.*?)\s*```', r'\1', output, flags=re.DOTALL).strip()
+            
+            try:
+                parsed = json.loads(clean_output)
+                
+                # Diagnostic: Log the size and complexity
+                logfire.info(
+                    "Sub-agent returned structured JSON from task: {task}", 
+                    task=task_description[:50],
+                    keys=list(parsed.keys()) if isinstance(parsed, dict) else "list",
+                    size_chars=len(clean_output)
+                )
+                
+                # Safety: If the output is massive, stay as a string to avoid overwhelming the parent LLM with structured state
+                if len(clean_output) > 25000: # ~25KB threshold
+                     logfire.warning("Sub-agent output too large for structured return, falling back to string.")
+                     return output
+                     
+                return parsed
+            except json.JSONDecodeError:
+                return output
+        
+        return output
     except Exception as e:
         return f"Error during delegation to agent '{actual_agent_id}': {str(e)}"

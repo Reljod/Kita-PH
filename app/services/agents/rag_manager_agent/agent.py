@@ -30,6 +30,7 @@ class RagManagerAgent(Agent):
         super().__init__(
             model=model,
             instructions=instructions,
+            retries=3,
             toolsets=[
                 file_toolset, 
                 parse_toolset, 

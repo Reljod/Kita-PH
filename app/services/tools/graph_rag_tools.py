@@ -1,7 +1,7 @@
 import uuid
 import logfire
 from pydantic_ai import FunctionToolset, RunContext
-from pydantic import Field
+from pydantic import Field, BaseModel
 from typing import Annotated, Dict, Any, List, Optional
 from datetime import datetime
 
@@ -9,14 +9,31 @@ from app.models.graph_rag import GraphDocument, GraphChunk, GraphEntity, GraphRe
 
 graph_rag_toolset = FunctionToolset()
 
+class ChunkInput(BaseModel):
+    content: Annotated[str, Field(description="The main text content of the chunk")]
+    heading: Annotated[str, Field(description="A descriptive heading for the chunk content")]
+    question: Annotated[str, Field(description="A question that this specific chunk provides the answer for")]
+
+class EntityInput(BaseModel):
+    name: Annotated[str, Field(description="The name of the entity")]
+    type: Annotated[str, Field(description="The type of entity (e.g., Person, Organization, Location, Concept)")]
+    description: Annotated[str, Field(description="A brief description of what this entity is or does")]
+    properties: Annotated[Dict[str, Any], Field(default_factory=dict, description="Additional metadata for the entity")]
+
+class RelationshipInput(BaseModel):
+    source: Annotated[str, Field(description="The name of the source entity")]
+    target: Annotated[str, Field(description="The name of the target entity")]
+    type: Annotated[str, Field(description="The relationship type (e.g., PLAYS_FOR, LOCATED_IN, WORKS_AT)")]
+    properties: Annotated[Dict[str, Any], Field(default_factory=dict, description="Additional metadata for the relationship")]
+
 @graph_rag_toolset.tool
 async def ingest_into_graph(
     ctx: RunContext[dict],
     file_id: Annotated[str, Field(description="The unique file ID")],
     filename: Annotated[str, Field(description="The original filename")],
-    chunks: Annotated[List[Dict[str, Any]], Field(description="List of chunks with 'content', 'heading', and 'question'")],
-    entities: Annotated[List[Dict[str, Any]], Field(description="List of entities with 'name', 'type', 'description'")],
-    relationships: Annotated[List[Dict[str, Any]], Field(description="List of relationships with 'source', 'target', 'type'")]
+    chunks: Annotated[List[ChunkInput], Field(description="List of chunks to ingest")],
+    entities: Annotated[List[EntityInput], Field(description="List of entities to ingest")],
+    relationships: Annotated[List[RelationshipInput], Field(description="List of relationships to ingest")]
 ) -> str:
     """
     Ingests a processed document into the Graph RAG system.
@@ -24,20 +41,37 @@ async def ingest_into_graph(
     and associated entities and relationships.
     """
     from app.services.graph_rag_service import GraphRagService
+    from app.services.file_service import FileService
     
     graph_service: GraphRagService = ctx.deps.get("graph_rag_service")
+    file_service: FileService = ctx.deps.get("file_service")
+    
     if not graph_service:
         return "Error: Graph RAG service not found in dependencies."
     
     try:
-        # 1. Prepare Document
+        # 1. Determine Scope
+        # If the file has an agent_id in its metadata, we use it for scoping.
+        # This ensures RAG filtering works correctly for agent-specific vs org-wide files.
+        agent_id_to_store = None
+        if file_service:
+            file_info = await file_service.get_file(file_id)
+            if file_info:
+                agent_id_to_store = file_info.agent_id
+
+        # 2. Prepare Document
         doc = GraphDocument(
             id=file_id,
             title=filename,
-            metadata={"source": "rag_manager_agent", "ingested_at": datetime.utcnow().isoformat()}
+            metadata={
+                "source": "rag_manager_agent", 
+                "ingested_at": datetime.utcnow().isoformat(),
+                "agent_id": agent_id_to_store,
+                "filename": filename
+            }
         )
         
-        # 2. Prepare Chunks
+        # 3. Prepare Chunks
         graph_chunks = []
         chunk_ids = []
         for c in chunks:
@@ -46,36 +80,40 @@ async def ingest_into_graph(
             graph_chunks.append(GraphChunk(
                 id=cid,
                 document_id=file_id,
-                content=c.get("content", ""),
+                content=c.content,
                 metadata={
-                    "heading": c.get("heading", ""),
-                    "question": c.get("question", ""),
-                    "source_file": filename
+                    "heading": c.heading,
+                    "question": c.question,
+                    "source_file": filename,
+                    "agent_id": agent_id_to_store,
+                    "filename": filename
                 }
             ))
             
         await graph_service.ingest_document(doc, graph_chunks)
         
-        # 3. Prepare Entities
+        # 4. Prepare Entities
         graph_entities = []
         entity_map = {} # Maps name to ID for relationship lookup
         for e in entities:
+            # We still generate a UUID for the GraphEntity object, 
+            # but the Service will MERGE on name.
             eid = str(uuid.uuid4())
-            name = e.get("name", "")
+            name = e.name
             entity_map[name] = eid
             graph_entities.append(GraphEntity(
                 id=eid,
                 name=name,
-                type=e.get("type", "General"),
-                description=e.get("description", ""),
-                properties=e.get("properties", {})
+                type=e.type,
+                description=e.description,
+                properties={**e.properties, "agent_id": agent_id_to_store}
             ))
             
-        # 4. Prepare Relationships
+        # 5. Prepare Relationships
         graph_relationships = []
         for r in relationships:
-            src_name = r.get("source")
-            tgt_name = r.get("target")
+            src_name = r.source
+            tgt_name = r.target
             
             src_id = entity_map.get(src_name)
             tgt_id = entity_map.get(tgt_name)
@@ -84,8 +122,8 @@ async def ingest_into_graph(
                 graph_relationships.append(GraphRelationship(
                     source_id=src_id,
                     target_id=tgt_id,
-                    rel_type=r.get("type", "RELATED_TO"),
-                    properties=r.get("properties", {})
+                    rel_type=r.type,
+                    properties={**r.properties, "agent_id": agent_id_to_store}
                 ))
                 
         await graph_service.add_entities_and_relationships(
