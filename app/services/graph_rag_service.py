@@ -241,7 +241,14 @@ class Neo4JGraphRagService:
                         if not key.isidentifier():
                             continue
                         param_name = f"filter_{idx}"
-                        filter_clauses.append(f"chunk.{key} = ${param_name}")
+                        
+                        # Special handling for agent_id scoping:
+                        # Allow access to agent-specific memory OR org-wide memory (NULL)
+                        if key == "agent_id":
+                            filter_clauses.append(f"(chunk.{key} = ${param_name} OR chunk.{key} IS NULL)")
+                        else:
+                            filter_clauses.append(f"chunk.{key} = ${param_name}")
+                            
                         params[param_name] = value
 
             where_clause = " WHERE " + " AND ".join(filter_clauses)
