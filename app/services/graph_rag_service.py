@@ -27,8 +27,7 @@ class GraphRagService(Protocol):
         self, 
         query_text: str, 
         limit: int = 5, 
-        agent_id: Optional[str] = None, 
-        filename: Optional[str] = None
+        filters: Optional[Dict[str, Any]] = None
     ) -> List[GraphRagSearchResult]:
         ...
 
@@ -121,9 +120,24 @@ class Neo4JGraphRagService:
 
             # Create Chunks and link to Document
             for chunk in chunks:
+                # Extract agent_id and filename from metadata for indexing/filtering
+                agent_id = chunk.metadata.get("agent_id")
+                filename = chunk.metadata.get("filename")
+                
+                # Calculate embedding if missing
+                if not chunk.embedding:
+                    loop = asyncio.get_event_loop()
+                    emb = await loop.run_in_executor(None, self.model.encode, chunk.content)
+                    chunk.embedding = emb.tolist()
+                
                 await session.run("""
                     MERGE (c:Chunk {id: $chunk_id, org_id: $org_id})
-                    SET c.content = $content, c.embedding = $embedding, c.metadata = $metadata
+                    SET c.content = $content, 
+                        c.embedding = $embedding, 
+                        c.metadata = $metadata,
+                        c.agent_id = $agent_id,
+                        c.filename = $filename,
+                        c.updated_at = datetime()
                     WITH c
                     MATCH (d:Document {id: $doc_id, org_id: $org_id})
                     MERGE (d)-[:HAS_CHUNK]->(c)
@@ -133,6 +147,8 @@ class Neo4JGraphRagService:
                 content=chunk.content, 
                 embedding=chunk.embedding, 
                 metadata=json.dumps(chunk.metadata),
+                agent_id=agent_id,
+                filename=filename,
                 doc_id=doc.id)
             
             return True
@@ -195,13 +211,12 @@ class Neo4JGraphRagService:
         self, 
         query_text: str, 
         limit: int = 5,
-        agent_id: Optional[str] = None,
-        filename: Optional[str] = None
+        filters: Optional[Dict[str, Any]] = None
     ) -> List[GraphRagSearchResult]:
         """
         Hybrid search: 
         1. Find relevant chunks via vector search.
-        2. Travevrse graph from chunks to entities and neighbors.
+        2. Traverse graph from chunks to entities and neighbors.
         3. Collect context and return.
         """
         # Calculate embedding
@@ -211,14 +226,31 @@ class Neo4JGraphRagService:
 
         results = []
         async with self.driver.session() as session:
+            # Dynamically build WHERE clause for filters
+            filter_clauses = ["chunk.org_id = $org_id"]
+            params = {
+                "embedding": query_embedding,
+                "limit": limit,
+                "org_id": self.org_id
+            }
+
+            if filters:
+                for idx, (key, value) in enumerate(filters.items()):
+                    if value is not None:
+                        # Sanitize key name for Cypher (simple check)
+                        if not key.isidentifier():
+                            continue
+                        param_name = f"filter_{idx}"
+                        filter_clauses.append(f"chunk.{key} = ${param_name}")
+                        params[param_name] = value
+
+            where_clause = " WHERE " + " AND ".join(filter_clauses)
+
             # Step 1 & 2: Vector search + graph traversal
-            # Added dynamic filtering for agent_id and filename
-            cypher = """
+            cypher = f"""
             CALL db.index.vector.queryNodes('chunk_embeddings', $limit, $embedding)
             YIELD node AS chunk, score
-            WHERE chunk.org_id = $org_id
-            AND ($agent_id IS NULL OR chunk.agent_id = $agent_id)
-            AND ($filename IS NULL OR chunk.filename = $filename)
+            {where_clause}
             
             // Get mentioned entities
             OPTIONAL MATCH (chunk)-[:MENTIONS]->(entity:Entity)
@@ -230,18 +262,11 @@ class Neo4JGraphRagService:
                 chunk.content AS content,
                 score,
                 chunk.metadata AS metadata,
-                collect(DISTINCT {id: entity.id, label: 'Entity', properties: entity {.*}}) AS entities,
-                collect(DISTINCT {id: neighbor.id, label: 'Entity', properties: neighbor {.*}}) AS neighbors
+                collect(DISTINCT {{id: entity.id, label: 'Entity', properties: entity {{.*}}}}) AS entities,
+                collect(DISTINCT {{id: neighbor.id, label: 'Entity', properties: neighbor {{.*}}}}) AS neighbors
             """
             
-            res = await session.run(
-                cypher, 
-                embedding=query_embedding, 
-                limit=limit, 
-                org_id=self.org_id,
-                agent_id=agent_id,
-                filename=filename
-            )
+            res = await session.run(cypher, **params)
             async for record in res:
                 # Combine nodes for the result
                 nodes = []
@@ -251,7 +276,10 @@ class Neo4JGraphRagService:
                         raw_props = n["properties"] or {}
                         props = {}
                         for pk, pv in raw_props.items():
-                            if isinstance(pv, str) and (pv.startswith("{") or pv.startswith("[")):
+                            # Handle Neo4j specific types that aren't JSON serializable by default
+                            if hasattr(pv, 'to_native'):
+                                props[pk] = pv.to_native()
+                            elif isinstance(pv, str) and (pv.startswith("{") or pv.startswith("[")):
                                 try:
                                     props[pk] = json.loads(pv)
                                 except:

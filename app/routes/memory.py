@@ -1,9 +1,12 @@
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, status, Query, Header
 from typing import List, Optional
 from app.models.rag import RagCreateRequest, RagResponse, RagUpdateRequest
+from app.models.graph_rag import GraphRagSearchResult
 from app.services.rag_service import MongoVectorDbRagService, IRagService
+from app.services.graph_rag_service import Neo4JGraphRagService, GraphRagService
 from app.db import db, TenantCollection
 from app.security import get_current_org_id
+import os
 
 router = APIRouter(prefix="/memory", tags=["Memory"])
 
@@ -13,6 +16,16 @@ def get_rag_service(
 ) -> IRagService:
     collection = TenantCollection(db.get_rag_collection(), org_id)
     return MongoVectorDbRagService(collection, agent_id=x_agent_id)
+
+def get_graph_rag_service(
+    org_id: str = Depends(get_current_org_id)
+) -> GraphRagService:
+    uri = os.getenv("NEO4J_URI")
+    user = os.getenv("NEO4J_USERNAME")
+    password = os.getenv("NEO4J_PASSWORD")
+    if not all([uri, user, password]):
+        raise HTTPException(status_code=500, detail="Graph RAG environment variables are not properly configured.")
+    return Neo4JGraphRagService(uri, user, password, org_id)
 
 @router.post("", response_model=RagResponse, status_code=status.HTTP_201_CREATED)
 async def create_rag(
@@ -42,6 +55,28 @@ async def search_memory(
         return await rag_service.search(query, limit=limit)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error searching memory: {str(e)}")
+
+@router.get("/search/v2", response_model=List[GraphRagSearchResult])
+async def search_memory_v2(
+    query: str = Query(..., description="The search query to find relevant information in graph RAG memory."), 
+    limit: int = Query(5, description="The maximum number of results to return."), 
+    agent_id: Optional[str] = Query(None, description="Optional agent ID filter"),
+    filename: Optional[str] = Query(None, description="Optional filename filter"),
+    graph_rag_service: GraphRagService = Depends(get_graph_rag_service)
+):
+    """
+    Graph-based RAG search with flexible filtering.
+    """
+    try:
+        filters = {}
+        if agent_id:
+            filters["agent_id"] = agent_id
+        if filename:
+            filters["filename"] = filename
+            
+        return await graph_rag_service.query(query, limit=limit, filters=filters)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error searching graph memory: {str(e)}")
 
 @router.get("/{rag_id}", response_model=RagResponse)
 async def get_rag(rag_id: str, rag_service: IRagService = Depends(get_rag_service)):
