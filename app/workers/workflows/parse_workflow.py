@@ -6,11 +6,7 @@ from app.services.event_service import HatchetEventService
 from app.db import db, TenantCollection
 import os
 
-from pydantic import BaseModel
-
-class ParseInput(BaseModel):
-    file_id: str
-    org_id: str
+from app.models.event import ParseInput
 
 @hatchet.task(name="parse-file", on_events=["file:completed"], input_validator=ParseInput)
 async def parse_file_task(input: ParseInput, ctx: Context):

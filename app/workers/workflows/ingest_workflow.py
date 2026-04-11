@@ -8,11 +8,7 @@ from app.services.event_service import HatchetEventService
 from app.services.llm_service import LlmService
 from app.db import db, TenantCollection
 import os
-from pydantic import BaseModel
-
-class IngestInput(BaseModel):
-    file_id: str
-    org_id: str
+from app.models.event import IngestInput
 
 @hatchet.task(name="ingest-file", on_events=["parse:completed"], input_validator=IngestInput)
 async def ingest_file_task(input: IngestInput, ctx: Context):
