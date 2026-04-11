@@ -14,17 +14,21 @@ class ChunkInput(BaseModel):
     heading: Annotated[str, Field(description="A descriptive heading for the chunk content")]
     question: Annotated[str, Field(description="A question that this specific chunk provides the answer for")]
 
+class PropertyInput(BaseModel):
+    key: Annotated[str, Field(description="The name of the metadata field")]
+    value: Annotated[str, Field(description="The value of the metadata field")]
+
 class EntityInput(BaseModel):
     name: Annotated[str, Field(description="The name of the entity")]
     type: Annotated[str, Field(description="The type of entity (e.g., Person, Organization, Location, Concept)")]
     description: Annotated[str, Field(description="A brief description of what this entity is or does")]
-    properties: Annotated[Dict[str, Any], Field(default_factory=dict, description="Additional metadata for the entity")]
+    properties: Annotated[List[PropertyInput], Field(default_factory=list, description="Additional metadata for the entity")]
 
 class RelationshipInput(BaseModel):
     source: Annotated[str, Field(description="The name of the source entity")]
     target: Annotated[str, Field(description="The name of the target entity")]
     type: Annotated[str, Field(description="The relationship type (e.g., PLAYS_FOR, LOCATED_IN, WORKS_AT)")]
-    properties: Annotated[Dict[str, Any], Field(default_factory=dict, description="Additional metadata for the relationship")]
+    properties: Annotated[List[PropertyInput], Field(default_factory=list, description="Additional metadata for the relationship")]
 
 @graph_rag_toolset.tool
 async def ingest_into_graph(
@@ -101,12 +105,14 @@ async def ingest_into_graph(
             eid = str(uuid.uuid4())
             name = e.name
             entity_map[name] = eid
+            # Convert List[PropertyInput] to dict
+            props_dict = {p.key: p.value for p in e.properties}
             graph_entities.append(GraphEntity(
                 id=eid,
                 name=name,
                 type=e.type,
                 description=e.description,
-                properties={**e.properties, "agent_id": agent_id_to_store}
+                properties={**props_dict, "agent_id": agent_id_to_store}
             ))
             
         # 5. Prepare Relationships
@@ -119,11 +125,13 @@ async def ingest_into_graph(
             tgt_id = entity_map.get(tgt_name)
             
             if src_id and tgt_id:
+                # Convert List[PropertyInput] to dict
+                props_dict = {p.key: p.value for p in r.properties}
                 graph_relationships.append(GraphRelationship(
                     source_id=src_id,
                     target_id=tgt_id,
                     rel_type=r.type,
-                    properties={**r.properties, "agent_id": agent_id_to_store}
+                    properties={**props_dict, "agent_id": agent_id_to_store}
                 ))
                 
         await graph_service.add_entities_and_relationships(
