@@ -1,3 +1,4 @@
+import logfire
 from dotenv import load_dotenv
 from app.db import db
 from app.workers.hatchet import hatchet
@@ -8,6 +9,11 @@ from app.workers.workflows.ingest_workflow import ingest_file_task
 def main():
     # Load environment variables
     load_dotenv(".env.local")
+    load_dotenv()
+    
+    # Configure Logfire
+    logfire.configure()
+    logfire.instrument_pydantic_ai()
     
     # Initialize database connection
     db.connect()
