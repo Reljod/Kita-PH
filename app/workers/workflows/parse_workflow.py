@@ -36,7 +36,7 @@ async def parse_file_task(input: ParseInput, ctx: Context):
     )
 
     try:
-        result = await parse_service.parse_file(file_id, org_id)
+        await parse_service.parse_file(file_id, org_id)
         return {"status": "success", "file_id": file_id}
     except Exception as e:
         print(f"Error parsing file {file_id}: {str(e)}")

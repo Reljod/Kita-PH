@@ -105,7 +105,7 @@ class LlamaParseService(IParseService):
         self.parse_collection.insert_one(parse_record.model_dump())
 
         # Push event
-        await self.event_service.push("file:parsed", {
+        await self.event_service.push("parse:completed", {
             "file_id": file_id,
             "org_id": org_id,
             "parser": "llama_parse_v2"
