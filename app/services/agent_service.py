@@ -14,7 +14,7 @@ from app.services.llm_service import ILlmService
 from app.services.agents.templates.system_prompt import build_system_prompt
 from app.services.tools.memory_tools import memory_toolset
 from app.services.tools.delegation_tools import delegation_toolset
-from app.services.tools import get_toolsets_by_names
+from app.services.tools import get_tools_by_names
 from app.db import TenantCollection
 
 
@@ -60,12 +60,15 @@ class AgentService(IAgentService):
         doc["_id"] = res.inserted_id
         doc["base_id"] = base_id_str
 
+        tool_ids = req.tools or []
+        tool_names = self._resolve_tool_names(tool_ids)
         system_prompt = build_system_prompt(
             name=req.name,
             role=req.role,
             goal=req.goal,
             backstory=req.backstory,
             personalities=req.personalities,
+            tools=tool_names,
         )
         return format_agent_response(doc, system_prompt=system_prompt)
 
@@ -76,13 +79,40 @@ class AgentService(IAgentService):
         else:
             return self.collection.find_one({"base_id": base_id}, sort=[("version", -1)])
 
+    def _resolve_tool_names(self, tool_ids: List[str]) -> List[str]:
+        if not tool_ids:
+            tool_ids = []
+        tool_names = []
+        if self.tools_collection:
+            for tid in tool_ids:
+                try:
+                    t_doc = self.tools_collection.find_one({"_id": ObjectId(tid)})
+                    if t_doc:
+                        tool_names.append(t_doc["name"])
+                except Exception:
+                    # Fallback: check if tid is actually the name
+                    t_doc = self.tools_collection.find_one({"name": tid})
+                    if t_doc:
+                        tool_names.append(t_doc["name"])
+        else:
+            # Fallback if no tools collection is available
+            tool_names = [str(tid) for tid in tool_ids]
+            
+        if "delegate_task" not in tool_names:
+            tool_names.append("delegate_task")
+            
+        return tool_names
+
     def _build_prompt_from_doc(self, doc: dict) -> str:
+        tool_ids = doc.get("tools", [])
+        tool_names = self._resolve_tool_names(tool_ids)
         return build_system_prompt(
             name=doc["name"],
             role=doc["role"],
             goal=doc["goal"],
             backstory=doc["backstory"],
             personalities=doc.get("personalities"),
+            tools=tool_names,
         )
 
     def get_agent(self, agent_id: str) -> Optional[AgentResponse]:
@@ -231,25 +261,14 @@ class AgentService(IAgentService):
         system_prompt = self._build_prompt_from_doc(doc)
         
         tool_ids = doc.get("tools", [])
-        tool_names = []
-        
-        if self.tools_collection and tool_ids:
-            for tid in tool_ids:
-                try:
-                    t_doc = self.tools_collection.find_one({"_id": ObjectId(tid)})
-                    if t_doc:
-                        tool_names.append(t_doc["name"])
-                except Exception:
-                    # Fallback: check if tid is actually the name
-                    t_doc = self.tools_collection.find_one({"name": tid})
-                    if t_doc:
-                        tool_names.append(t_doc["name"])
+        tool_names = self._resolve_tool_names(tool_ids)
 
-        dynamic_toolsets = get_toolsets_by_names(tool_names)
-        toolsets = dynamic_toolsets + [delegation_toolset]
+        # Retrieve only individual requested Tools (excluding delegate_task as it's passed via toolsets)
+        dynamic_tools = get_tools_by_names([t for t in tool_names if t != "delegate_task"])
 
         return Agent(
             model=model,
             instructions=system_prompt,
-            toolsets=toolsets
+            tools=dynamic_tools,
+            toolsets=[delegation_toolset]
         )
