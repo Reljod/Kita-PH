@@ -17,10 +17,19 @@ async def search_memory(
     Searches the agent's memory (RAG) for relevant information based on the query.
     This uses MongoDB embeddings for vector search.
     """
-    org_id = ctx.deps["org_id"]
-    agent_id = ctx.deps.get("agent_id")
-    collection = TenantCollection(db.get_rag_collection(), org_id)
-    service = MongoVectorDbRagService(collection, agent_id=agent_id)
+    service = ctx.deps.get("rag_service")
+    if not service:
+        # Fallback to manual instantiation
+        org_id = ctx.deps["org_id"]
+        agent_id = ctx.deps.get("agent_id")
+        collection = TenantCollection(db.get_rag_collection(), org_id)
+        service = MongoVectorDbRagService(collection, agent_id=agent_id)
+    else:
+        # Bind the current agent_id if the service was constructed without one or with a different one
+        agent_id = ctx.deps.get("agent_id")
+        if agent_id:
+            service = MongoVectorDbRagService(service.collection, agent_id=agent_id)
+
     results = await service.search(query, limit=limit)
     
     if not results:
@@ -28,7 +37,10 @@ async def search_memory(
     
     formatted_results = []
     for i, res in enumerate(results, 1):
-        formatted_results.append(f"{i}. Title: {res.title}\nContent: {res.content}")
+        if res.question and res.answer:
+            formatted_results.append(f"{i}. Question: {res.question}\nAnswer: {res.answer}")
+        else:
+            formatted_results.append(f"{i}. Title: {res.title}\nContent: {res.content}")
     
     return "\n\n".join(formatted_results)
 

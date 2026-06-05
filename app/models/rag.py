@@ -19,6 +19,9 @@ class RagResponse(BaseModel):
     agent_id: Optional[str] = None
     created_at: datetime
     updated_at: datetime
+    question: Optional[str] = None
+    answer: Optional[str] = None
+    original_content: Optional[str] = None
 
 class RagDocument(BaseModel):
     org_id: Optional[str] = None
@@ -29,3 +32,6 @@ class RagDocument(BaseModel):
     status: str = "pending"
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
+    question: Optional[str] = None
+    answer: Optional[str] = None
+    original_content: Optional[str] = None

@@ -88,12 +88,17 @@ def get_chat_service(
     neo4j_password = os.getenv("NEO4J_PASSWORD", "password")
     graph_service = Neo4JGraphRagService(neo4j_uri, neo4j_user, neo4j_password, org_id)
     
+    from app.services.rag_service import MongoVectorDbRagService
+    rag_coll = TenantCollection(db.get_rag_collection(), org_id)
+    rag_service = MongoVectorDbRagService(rag_coll)
+    
     return ChatService(
         agent_service=agent_service, 
         collection=collection,
         file_service=file_service,
         parse_service=parse_service,
-        graph_rag_service=graph_service
+        graph_rag_service=graph_service,
+        rag_service=rag_service
     )
 
 @router.post("/{agent_id}/chat", response_model=ChatResponse)

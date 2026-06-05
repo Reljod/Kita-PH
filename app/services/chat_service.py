@@ -52,22 +52,38 @@ class ChatService(IChatService):
         collection: TenantCollection,
         file_service: Optional[Any] = None,
         parse_service: Optional[Any] = None,
-        graph_rag_service: Optional[Any] = None
+        graph_rag_service: Optional[Any] = None,
+        rag_service: Optional[Any] = None
     ):
         self.agent_service = agent_service
         self.collection = collection
         self.file_service = file_service
         self.parse_service = parse_service
         self.graph_rag_service = graph_rag_service
+        self.rag_service = rag_service
 
     def _get_deps(self, agent_id: Optional[str]) -> Dict[str, Any]:
+        from app.services.rag_service import MongoVectorDbRagService
+        from app.db import db
+        
+        # Build scoped rag_service
+        rag_service = self.rag_service
+        if not rag_service:
+            # Fallback construct
+            rag_coll = TenantCollection(db.get_rag_collection(), self.collection.org_id)
+            rag_service = MongoVectorDbRagService(rag_coll, agent_id=agent_id)
+        else:
+            # Create a copy/instance bound to agent_id
+            rag_service = MongoVectorDbRagService(rag_service.collection, agent_id=agent_id)
+
         return {
             "org_id": self.collection.org_id, 
             "agent_id": agent_id, 
             "agent_service": self.agent_service,
             "file_service": self.file_service,
             "parse_service": self.parse_service,
-            "graph_rag_service": self.graph_rag_service
+            "graph_rag_service": self.graph_rag_service,
+            "rag_service": rag_service
         }
 
     async def create_chat(self, req: ChatCreateRequest, agent_id: Optional[str] = None) -> ChatResponse:
