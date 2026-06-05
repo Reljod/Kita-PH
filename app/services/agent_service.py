@@ -87,8 +87,6 @@ class AgentService(IAgentService):
         )
 
     def get_agent(self, agent_id: str) -> Optional[AgentResponse]:
-        if agent_id in SYSTEM_AGENTS:
-            return SYSTEM_AGENTS[agent_id]
         doc = self._get_agent_doc(agent_id)
         if not doc:
             return None
@@ -154,7 +152,6 @@ class AgentService(IAgentService):
         latest_agents = list(self.collection.aggregate(pipeline))
         # System prompt is omitted in list view for performance
         db_agents = [format_agent_response(a["doc"]) for a in latest_agents]
-        all_agents = list(SYSTEM_AGENTS.values()) + db_agents
         
         if include_last_chat:
             from app.services.chat_service import ChatService
@@ -162,12 +159,12 @@ class AgentService(IAgentService):
             chats_coll = TenantCollection(db.get_chats_collection(), self.collection.org_id)
             chat_service = ChatService(self, chats_coll)
             
-            for agent in all_agents:
+            for agent in db_agents:
                 last_chats = chat_service.get_all_chats(agent_id=agent.id, preview=True, limit=1)
                 if last_chats:
                     agent.last_chat = last_chats[0]
                     
-        return all_agents
+        return db_agents
 
     def delete_agent(self, agent_id: str) -> bool:
         base_id, _ = parse_agent_id(agent_id)
@@ -219,20 +216,25 @@ class AgentService(IAgentService):
 
     def get_runnable_agent(self, agent_id: Optional[str] = None) -> Agent:
         if not agent_id:
-            model_name = os.getenv("LLM_MODEL", "x-ai/grok-4.3")
+            doc = self._get_agent_doc("kita-assistant")
+            if doc:
+                llm = self.llm_service.get_llm(doc["llm_id"])
+                model_name = llm.model if llm else os.getenv("LLM_MODEL", "x-ai/grok-4.3")
+                instructions = self._build_prompt_from_doc(doc)
+            else:
+                model_name = os.getenv("LLM_MODEL", "x-ai/grok-4.3")
+                instructions = build_system_prompt(
+                    name=BASE_AGENT.name,
+                    role=BASE_AGENT.role,
+                    goal=BASE_AGENT.goal,
+                    backstory=BASE_AGENT.backstory,
+                    personalities=BASE_AGENT.personalities
+                )
+            
             api_key = os.getenv("OPENROUTER_API_KEY", "")
-
             model = OpenRouterModel(
                 model_name,
                 provider=OpenRouterProvider(api_key=api_key),
-            )
-            
-            instructions = build_system_prompt(
-                name=BASE_AGENT.name,
-                role=BASE_AGENT.role,
-                goal=BASE_AGENT.goal,
-                backstory=BASE_AGENT.backstory,
-                personalities=BASE_AGENT.personalities
             )
             return Agent(
                 model=model,
@@ -240,41 +242,21 @@ class AgentService(IAgentService):
                 toolsets=[memory_toolset, delegation_toolset]
             )
             
-        if agent_id in SYSTEM_AGENTS:
-            agent_def = SYSTEM_AGENTS[agent_id]
-            # Creator agent has special logic
-            if agent_id == "agent-creator":
-                from app.services.agents.creator_agent.agent import CreatorAgent
-                return CreatorAgent()
-            
-            # Rag Manager agent has special logic
-            if agent_id == "rag-manager":
-                from app.services.agents.rag_manager_agent.agent import RagManagerAgent
-                return RagManagerAgent()
-            
-            # Others use the standard template
-            model_name = agent_def.llm_id or os.getenv("LLM_MODEL", "x-ai/grok-4.3")
-            api_key = os.getenv("OPENROUTER_API_KEY", "")
-            model = OpenRouterModel(
-                model_name,
-                provider=OpenRouterProvider(api_key=api_key),
-            )
-            instructions = build_system_prompt(
-                name=agent_def.name,
-                role=agent_def.role,
-                goal=agent_def.goal,
-                backstory=agent_def.backstory,
-                personalities=agent_def.personalities
-            )
-            return Agent(
-                model=model,
-                instructions=instructions,
-                toolsets=[memory_toolset, delegation_toolset]
-            )
+        # Special check for rag-manager (since it's not stored in the DB)
+        if agent_id == "rag-manager":
+            from app.services.agents.rag_manager_agent.agent import RagManagerAgent
+            return RagManagerAgent()
 
         doc = self._get_agent_doc(agent_id)
         if not doc:
             raise ValueError("Agent not found")
+
+        base_id = doc.get("base_id") or str(doc["_id"])
+        
+        # Creator agent has special logic
+        if base_id == "agent-creator":
+            from app.services.agents.creator_agent.agent import CreatorAgent
+            return CreatorAgent()
             
         llm = self.llm_service.get_llm(doc["llm_id"])
         if not llm:

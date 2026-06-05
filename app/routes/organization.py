@@ -1,9 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from typing import List
 from app.models.organization import (
     OrganizationResponse, OrgCreate, OrgUpdate, OrgMemberUpdate, OrgIntegrationUpdate
 )
-from app.models.user import UserResponse
 from app.models.user import UserResponse
 from app.security import get_current_user, require_org_membership
 from app.services.organization_service import OrganizationService
@@ -13,13 +12,79 @@ router = APIRouter(prefix="/org", tags=["org"])
 def get_org_service():
     return OrganizationService()
 
+async def run_org_scaffolding(org_id: str):
+    from app.services.llm_service import LlmService
+    from app.services.agent_service import AgentService
+    from app.services.tool_service import ToolService
+    from app.services.rag_service import MongoVectorDbRagService
+    from app.services.organization_creation_service import OrganizationCreationService
+    from app.services.organization_service import OrganizationService
+    from app.services.web_search_service import SerperSearchService
+    from app.db import db, TenantCollection
+
+    llm_coll = TenantCollection(db.get_llms_collection(), org_id)
+    llm_service = LlmService(llm_coll)
+
+    agent_coll = TenantCollection(db.get_agents_collection(), org_id)
+    tools_coll = TenantCollection(db.get_tools_collection(), org_id)
+    agent_service = AgentService(llm_service=llm_service, collection=agent_coll, tools_collection=tools_coll)
+
+    web_search_service = SerperSearchService()
+    tool_service = ToolService(web_search_service=web_search_service, collection=tools_coll)
+
+    rag_coll = TenantCollection(db.get_rag_collection(), org_id)
+    rag_service = MongoVectorDbRagService(rag_coll)
+
+    org_service = OrganizationService()
+
+    creation_service = OrganizationCreationService(
+        llm_service=llm_service,
+        agent_service=agent_service,
+        tool_service=tool_service,
+        rag_service=rag_service,
+        org_service=org_service
+    )
+
+    try:
+        await creation_service.initialize_org(org_id)
+    except Exception as e:
+        print(f"Error running organization scaffolding for {org_id}: {e}")
+
 @router.post("/", response_model=OrganizationResponse)
 async def create_organization(
     org_in: OrgCreate,
+    background_tasks: BackgroundTasks,
     current_user: UserResponse = Depends(get_current_user),
     org_service: OrganizationService = Depends(get_org_service)
 ):
-    return org_service.create_org(org_in, current_user.id)
+    org = org_service.create_org(org_in, current_user.id)
+    background_tasks.add_task(run_org_scaffolding, org.id)
+    return org
+
+@router.get("/{id}/status")
+async def get_org_creation_status(
+    id: str,
+    current_user: UserResponse = Depends(get_current_user),
+    org_service: OrganizationService = Depends(get_org_service)
+):
+    # Try finding by ID first, then code
+    org = org_service.get_org(id)
+    if not org:
+        org = org_service.get_org_by_code(id)
+        
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+        
+    # Check if user is a member of the organization
+    is_member = any(member.user_id == current_user.id for member in org.org_members)
+    if not is_member:
+        raise HTTPException(status_code=403, detail="Access denied to this organization")
+        
+    return {
+        "org_id": org.id,
+        "status": org.status or "completed"
+    }
+
 
 @router.get("/me", response_model=List[OrganizationResponse])
 async def get_my_organizations(
