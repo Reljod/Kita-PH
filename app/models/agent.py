@@ -36,6 +36,7 @@ class RemoveToolsRequest(BaseModel):
 class AgentResponse(BaseModel):
     id: str
     base_id: Optional[str] = None
+    system_id: Optional[str] = None
     version: int
     name: str
     role: str
@@ -52,6 +53,7 @@ class AgentResponse(BaseModel):
 class AgentDocument(BaseModel):
     org_id: Optional[str] = None
     base_id: Optional[str] = None
+    system_id: Optional[str] = None
     version: int = 1
     name: str
     role: str
@@ -72,6 +74,7 @@ def format_agent_response(doc: dict, system_prompt: Optional[str] = None) -> Age
     return AgentResponse(
         id=base_id,
         base_id=base_id,
+        system_id=doc.get("system_id"),
         version=version,
         name=doc["name"],
         role=doc["role"],
@@ -84,3 +87,4 @@ def format_agent_response(doc: dict, system_prompt: Optional[str] = None) -> Age
         created_at=doc.get("created_at", datetime.utcnow()),
         updated_at=doc.get("updated_at", datetime.utcnow())
     )
+

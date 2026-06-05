@@ -1,5 +1,6 @@
 import os
 from datetime import datetime
+from typing import Optional
 from app.services.llm_service import ILlmService
 from app.services.agent_service import IAgentService
 from app.services.tool_service import IToolService
@@ -75,23 +76,81 @@ class OrganizationCreationService:
         return llm.id
     
     async def generate_default_agents(self, llm_id: str):
-        search_mem = await self.tool_service.get_tool_by_name("search_memory")
-        search_mem_v2 = await self.tool_service.get_tool_by_name("search_memory_v2")
-        kita_tools = []
-        if search_mem:
-            kita_tools.append(str(search_mem["_id"]))
-        if search_mem_v2:
-            kita_tools.append(str(search_mem_v2["_id"]))
+        from bson import ObjectId
+        from pathlib import Path
 
-        # 1. Kita Assistant
+        # Helper to read instructions from markdown files
+        base_dir = Path(__file__).parent / "agents"
+        
+        def read_instructions(subdir: str, fallback: str) -> str:
+            path = base_dir / subdir / "instructions.md"
+            if path.exists():
+                return path.read_text(encoding="utf-8")
+            return fallback
+
+        kita_backstory = read_instructions(
+            "kita_assistant_agent",
+            "You are a state-of-the-art AI assistant, designed to be professional, helpful, and efficient. You have access to tools that enhance your capabilities."
+        )
+        creator_backstory = read_instructions(
+            "creator_agent",
+            "You are an expert AI Agent Creator. Your role is to design and formulate specialized AI agents based on user requests. You create agents of different roles, goals, and backstories."
+        )
+        rag_backstory = read_instructions(
+            "rag_manager_agent",
+            "You are the expert Rag Manager Agent. Your role is to orchestrate the ingestion of documents into a Meta-Ontology Graph RAG system. You handle file resolution, parse retrieval, sliding window chunking, and delegation to specialized agents."
+        )
+
+        # Helper to resolve registered tool database ObjectIDs by name
+        async def get_tool_id(name: str) -> Optional[str]:
+            t = await self.tool_service.get_tool_by_name(name)
+            return str(t["_id"]) if t else None
+
+        # 1. Kita Assistant Tools
+        kita_tools = []
+        search_mem_id = await get_tool_id("search_memory")
+        if search_mem_id:
+            kita_tools.append(search_mem_id)
+
+        # 2. Agent Creator Tools
+        creator_tool_names = [
+            "create_agent", 
+            "get_agent", 
+            "list_agents", 
+            "update_agent", 
+            "search_memory", 
+            "list_available_llms"
+        ]
+        creator_tools = []
+        for name in creator_tool_names:
+            tid = await get_tool_id(name)
+            if tid:
+                creator_tools.append(tid)
+
+        # 3. Rag Manager Tools
+        rag_tool_names = [
+            "resolve_file_id",
+            "fetch_latest_parse",
+            "get_available_agents",
+            "ingest_into_graph"
+        ]
+        rag_tools = []
+        for name in rag_tool_names:
+            tid = await get_tool_id(name)
+            if tid:
+                rag_tools.append(tid)
+
+        # Seeding agents
+        kita_id = ObjectId()
         kita_doc = {
-            "_id": "kita-assistant",
-            "base_id": "kita-assistant",
+            "_id": kita_id,
+            "base_id": str(kita_id),
+            "system_id": "kita-assistant",
             "version": 1,
             "name": "Kita Assistant",
             "role": "Helpful AI Assistant",
             "goal": "Provide concise and expert assistance with any task or question.",
-            "backstory": "You are a state-of-the-art AI assistant, designed to be professional, helpful, and efficient. You have access to tools that enhance your capabilities.",
+            "backstory": kita_backstory,
             "personalities": ["Helpful", "Professional", "Concise"],
             "llm_id": llm_id,
             "tools": kita_tools,
@@ -99,18 +158,36 @@ class OrganizationCreationService:
             "updated_at": datetime.utcnow()
         }
         
-        # 2. Agent Creator
+        creator_id = ObjectId()
         creator_doc = {
-            "_id": "agent-creator",
-            "base_id": "agent-creator",
+            "_id": creator_id,
+            "base_id": str(creator_id),
+            "system_id": "agent-creator",
             "version": 1,
             "name": "Agent Creator",
             "role": "Expert AI Agent Creator",
             "goal": "Design and formulate specialized AI agents based on user requests.",
-            "backstory": "You are an expert AI Agent Creator. Your role is to design and formulate specialized AI agents based on user requests. You create agents of different roles, goals, and backstories.",
+            "backstory": creator_backstory,
             "personalities": None,
             "llm_id": llm_id,
-            "tools": [],
+            "tools": creator_tools,
+            "created_at": datetime.utcnow(),
+            "updated_at": datetime.utcnow()
+        }
+
+        rag_id = ObjectId()
+        rag_doc = {
+            "_id": rag_id,
+            "base_id": str(rag_id),
+            "system_id": "rag-manager",
+            "version": 1,
+            "name": "Rag Manager",
+            "role": "Expert Rag Manager Agent",
+            "goal": "Orchestrate the ingestion of documents into a Meta-Ontology Graph RAG system.",
+            "backstory": rag_backstory,
+            "personalities": None,
+            "llm_id": llm_id,
+            "tools": rag_tools,
             "created_at": datetime.utcnow(),
             "updated_at": datetime.utcnow()
         }
@@ -118,6 +195,8 @@ class OrganizationCreationService:
         # Save default agents to DB
         self.agent_service.collection.insert_one(kita_doc)
         self.agent_service.collection.insert_one(creator_doc)
+        self.agent_service.collection.insert_one(rag_doc)
+
 
     async def generate_default_tools(self):
         from app.services.tools import get_available_tools
@@ -139,8 +218,11 @@ class OrganizationCreationService:
             await self.rag_service.update_embedding(rag_resp.id)
     
     def revert_initialization(self):
-        # Tenant collection automatically scopes queries/deletions to the organization
+        org_id = self.agent_service.collection.org_id
+        print(f"[REVERT] Reverting organization initialization for {org_id} due to failure.")
         self.llm_service.collection.delete_many({})
         self.agent_service.collection.delete_many({})
         self.tool_service.collection.delete_many({})
         self.rag_service.collection.delete_many({})
+        print(f"[REVERT] Successfully deleted all scaffolding records for {org_id}.")
+

@@ -25,7 +25,7 @@ class IAgentService(Protocol):
     def get_agent(self, agent_id: str) -> Optional[AgentResponse]: ...
     def get_all_agents(self, include_last_chat: bool = False) -> List[AgentResponse]: ...
     def delete_agent(self, agent_id: str) -> bool: ...
-    def get_runnable_agent(self, agent_id: Optional[str] = None) -> Agent: ...
+    def get_runnable_agent(self, agent_id: str) -> Agent: ...
     async def add_tools(self, agent_id: str, tool_ids: List[str]) -> bool: ...
     async def remove_tools(self, agent_id: str, tool_ids: List[str]) -> bool: ...
     def get_agents_by_tool(self, tool_id: str) -> List[AgentResponse]: ...
@@ -214,50 +214,15 @@ class AgentService(IAgentService):
         latest_agents = list(self.collection.aggregate(pipeline))
         return [format_agent_response(a["doc"]) for a in latest_agents]
 
-    def get_runnable_agent(self, agent_id: Optional[str] = None) -> Agent:
-        if not agent_id:
-            doc = self._get_agent_doc("kita-assistant")
-            if doc:
-                llm = self.llm_service.get_llm(doc["llm_id"])
-                model_name = llm.model if llm else os.getenv("LLM_MODEL", "x-ai/grok-4.3")
-                instructions = self._build_prompt_from_doc(doc)
-            else:
-                model_name = os.getenv("LLM_MODEL", "x-ai/grok-4.3")
-                instructions = build_system_prompt(
-                    name=BASE_AGENT.name,
-                    role=BASE_AGENT.role,
-                    goal=BASE_AGENT.goal,
-                    backstory=BASE_AGENT.backstory,
-                    personalities=BASE_AGENT.personalities
-                )
-            
-            api_key = os.getenv("OPENROUTER_API_KEY", "")
-            model = OpenRouterModel(
-                model_name,
-                provider=OpenRouterProvider(api_key=api_key),
-            )
-            return Agent(
-                model=model,
-                instructions=instructions,
-                toolsets=[memory_toolset, delegation_toolset]
-            )
-            
-        # Special check for rag-manager (since it's not stored in the DB)
-        if agent_id == "rag-manager":
-            from app.services.agents.rag_manager_agent.agent import RagManagerAgent
-            return RagManagerAgent()
-
+    def get_runnable_agent(self, agent_id: str) -> Agent:
         doc = self._get_agent_doc(agent_id)
         if not doc:
-            raise ValueError("Agent not found")
-
-        base_id = doc.get("base_id") or str(doc["_id"])
-        
-        # Creator agent has special logic
-        if base_id == "agent-creator":
-            from app.services.agents.creator_agent.agent import CreatorAgent
-            return CreatorAgent()
+            # Fallback lookup by system_id
+            doc = self.collection.find_one({"system_id": agent_id})
             
+        if not doc:
+            raise ValueError(f"Agent '{agent_id}' not found")
+
         llm = self.llm_service.get_llm(doc["llm_id"])
         if not llm:
             raise ValueError("LLM associated with Agent not found")
@@ -286,9 +251,21 @@ class AgentService(IAgentService):
                         tool_names.append(t_doc["name"])
 
         dynamic_toolsets = get_toolsets_by_names(tool_names)
-        
-        return Agent(
-            model=model,
-            instructions=system_prompt,
-            toolsets=dynamic_toolsets + [delegation_toolset]
-        )
+        toolsets = dynamic_toolsets + [delegation_toolset]
+
+        system_id = doc.get("system_id")
+        if system_id == "kita-assistant":
+            from app.services.agents.kita_assistant_agent.agent import KitaAssistantAgent
+            return KitaAssistantAgent(model=model, instructions=system_prompt, toolsets=toolsets)
+        elif system_id == "agent-creator":
+            from app.services.agents.creator_agent.agent import CreatorAgent
+            return CreatorAgent(model=model, instructions=system_prompt, toolsets=toolsets)
+        elif system_id == "rag-manager":
+            from app.services.agents.rag_manager_agent.agent import RagManagerAgent
+            return RagManagerAgent(model=model, instructions=system_prompt, toolsets=toolsets)
+        else:
+            return Agent(
+                model=model,
+                instructions=system_prompt,
+                toolsets=toolsets
+            )
