@@ -38,8 +38,8 @@ async def create_agent(
         # Try to match with LLM_MODEL from .env
         match = next((l for l in available_llms if l.model == env_model), None)
         if not match:
-            # Try to match with grok-4.1-fast fallback
-            match = next((l for l in available_llms if l.model == "x-ai/grok-4.1-fast"), None)
+            # Try to match with grok-4.3 fallback
+            match = next((l for l in available_llms if l.model == "x-ai/grok-4.3"), None)
             
         llm_id = match.id if match else ""
 

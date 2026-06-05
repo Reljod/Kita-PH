@@ -14,7 +14,7 @@ from app.services.tools.delegation_tools import delegation_toolset
 
 class RagManagerAgent(Agent):
     def __init__(self):
-        model_name = os.getenv("LLM_MODEL", "x-ai/grok-4.1-fast") # Use a powerful model for coordination
+        model_name = os.getenv("LLM_MODEL", "x-ai/grok-4.3") # Use a powerful model for coordination
         api_key = os.getenv("OPENROUTER_API_KEY", "")
 
         model = OpenRouterModel(

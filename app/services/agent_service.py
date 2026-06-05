@@ -219,7 +219,7 @@ class AgentService(IAgentService):
 
     def get_runnable_agent(self, agent_id: Optional[str] = None) -> Agent:
         if not agent_id:
-            model_name = os.getenv("LLM_MODEL", "x-ai/grok-4.1-fast")
+            model_name = os.getenv("LLM_MODEL", "x-ai/grok-4.3")
             api_key = os.getenv("OPENROUTER_API_KEY", "")
 
             model = OpenRouterModel(
@@ -253,7 +253,7 @@ class AgentService(IAgentService):
                 return RagManagerAgent()
             
             # Others use the standard template
-            model_name = agent_def.llm_id or os.getenv("LLM_MODEL", "x-ai/grok-4.1-fast")
+            model_name = agent_def.llm_id or os.getenv("LLM_MODEL", "x-ai/grok-4.3")
             api_key = os.getenv("OPENROUTER_API_KEY", "")
             model = OpenRouterModel(
                 model_name,
