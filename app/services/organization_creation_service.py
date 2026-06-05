@@ -145,7 +145,6 @@ class OrganizationCreationService:
         kita_doc = {
             "_id": kita_id,
             "base_id": str(kita_id),
-            "system_id": "kita-assistant",
             "version": 1,
             "name": "Kita Assistant",
             "role": "Helpful AI Assistant",
@@ -162,7 +161,6 @@ class OrganizationCreationService:
         creator_doc = {
             "_id": creator_id,
             "base_id": str(creator_id),
-            "system_id": "agent-creator",
             "version": 1,
             "name": "Agent Creator",
             "role": "Expert AI Agent Creator",
@@ -179,7 +177,6 @@ class OrganizationCreationService:
         rag_doc = {
             "_id": rag_id,
             "base_id": str(rag_id),
-            "system_id": "rag-manager",
             "version": 1,
             "name": "Rag Manager",
             "role": "Expert Rag Manager Agent",

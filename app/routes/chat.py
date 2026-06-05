@@ -57,6 +57,8 @@ async def create_chat(
 ):
     try:
         return await chat_service.create_chat(req, agent_id=x_agent_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error generating AI response: {str(e)}")
 

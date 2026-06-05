@@ -11,7 +11,6 @@ from app.models.agent import (
     parse_agent_id, format_agent_response
 )
 from app.services.llm_service import ILlmService
-from app.services.agents.system_agents import SYSTEM_AGENTS, BASE_AGENT
 from app.services.agents.templates.system_prompt import build_system_prompt
 from app.services.tools.memory_tools import memory_toolset
 from app.services.tools.delegation_tools import delegation_toolset
@@ -217,10 +216,6 @@ class AgentService(IAgentService):
     def get_runnable_agent(self, agent_id: str) -> Agent:
         doc = self._get_agent_doc(agent_id)
         if not doc:
-            # Fallback lookup by system_id
-            doc = self.collection.find_one({"system_id": agent_id})
-            
-        if not doc:
             raise ValueError(f"Agent '{agent_id}' not found")
 
         llm = self.llm_service.get_llm(doc["llm_id"])
@@ -253,19 +248,8 @@ class AgentService(IAgentService):
         dynamic_toolsets = get_toolsets_by_names(tool_names)
         toolsets = dynamic_toolsets + [delegation_toolset]
 
-        system_id = doc.get("system_id")
-        if system_id == "kita-assistant":
-            from app.services.agents.kita_assistant_agent.agent import KitaAssistantAgent
-            return KitaAssistantAgent(model=model, instructions=system_prompt, toolsets=toolsets)
-        elif system_id == "agent-creator":
-            from app.services.agents.creator_agent.agent import CreatorAgent
-            return CreatorAgent(model=model, instructions=system_prompt, toolsets=toolsets)
-        elif system_id == "rag-manager":
-            from app.services.agents.rag_manager_agent.agent import RagManagerAgent
-            return RagManagerAgent(model=model, instructions=system_prompt, toolsets=toolsets)
-        else:
-            return Agent(
-                model=model,
-                instructions=system_prompt,
-                toolsets=toolsets
-            )
+        return Agent(
+            model=model,
+            instructions=system_prompt,
+            toolsets=toolsets
+        )

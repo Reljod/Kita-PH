@@ -72,11 +72,7 @@ class ChatService(IChatService):
 
     async def create_chat(self, req: ChatCreateRequest, agent_id: Optional[str] = None) -> ChatResponse:
         if not agent_id:
-            kita_doc = self.agent_service.collection.find_one({"system_id": "kita-assistant"})
-            if kita_doc:
-                agent_id = str(kita_doc["_id"])
-            else:
-                raise ValueError("Default agent 'kita-assistant' not found in database.")
+            raise ValueError("agent_id is required")
 
         agent = self.agent_service.get_runnable_agent(agent_id=agent_id)
         result = await agent.run(req.message, deps=self._get_deps(agent_id))
@@ -117,11 +113,7 @@ class ChatService(IChatService):
             
         agent_to_run_with = agent_id or chat.get("agent_id")
         if not agent_to_run_with:
-            kita_doc = self.agent_service.collection.find_one({"system_id": "kita-assistant"})
-            if kita_doc:
-                agent_to_run_with = str(kita_doc["_id"])
-            else:
-                raise ValueError("Default agent 'kita-assistant' not found in database.")
+            raise ValueError("agent_id is required")
 
         agent = self.agent_service.get_runnable_agent(agent_id=agent_to_run_with)
         
