@@ -19,4 +19,4 @@ COPY ./app /app/app
 COPY main.py .
 
 # Run the app - using shell form to allow $PORT expansion
-CMD uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080}
+CMD uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}

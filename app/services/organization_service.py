@@ -16,6 +16,7 @@ class OrganizationService:
             org_name=org_in.org_name,
             org_code=org_in.org_code,
             org_members=[OrgMember(user_id=creator_id, role=OrgRole.ADMIN)],
+            status="initializing",
             created_at=datetime.utcnow(),
             updated_at=datetime.utcnow()
         )
@@ -23,6 +24,19 @@ class OrganizationService:
         result = self.collection.insert_one(org_dict)
         org_dict["id"] = str(result.inserted_id)
         return OrganizationResponse(**org_dict)
+
+    def update_org_status(self, org_id: str, status: str) -> bool:
+        try:
+            oid = ObjectId(org_id)
+            query = {"_id": oid}
+        except Exception:
+            query = {"_id": org_id}
+        result = self.collection.update_one(
+            query,
+            {"$set": {"status": status, "updated_at": datetime.utcnow()}}
+        )
+        return result.modified_count > 0
+
 
     def get_org(self, org_id: str) -> Optional[OrganizationResponse]:
         if not org_id:

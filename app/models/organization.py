@@ -19,6 +19,8 @@ class OrganizationBase(BaseModel):
     org_name: str = ""
     org_code: str = ""
     integrations: Optional[Integrations] = Field(default_factory=Integrations)
+    status: Optional[str] = "completed"
+
 
 class OrgCreate(BaseModel):
     org_name: str

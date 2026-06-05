@@ -11,10 +11,10 @@ from app.models.agent import (
     parse_agent_id, format_agent_response
 )
 from app.services.llm_service import ILlmService
-from app.services.agents.system_agents import SYSTEM_AGENTS, BASE_AGENT
 from app.services.agents.templates.system_prompt import build_system_prompt
 from app.services.tools.memory_tools import memory_toolset
-from app.services.tools import get_toolsets_by_names
+from app.services.tools.delegation_tools import delegation_toolset
+from app.services.tools import get_tools_by_names
 from app.db import TenantCollection
 
 
@@ -24,7 +24,7 @@ class IAgentService(Protocol):
     def get_agent(self, agent_id: str) -> Optional[AgentResponse]: ...
     def get_all_agents(self, include_last_chat: bool = False) -> List[AgentResponse]: ...
     def delete_agent(self, agent_id: str) -> bool: ...
-    def get_runnable_agent(self, agent_id: Optional[str] = None) -> Agent: ...
+    def get_runnable_agent(self, agent_id: str) -> Agent: ...
     async def add_tools(self, agent_id: str, tool_ids: List[str]) -> bool: ...
     async def remove_tools(self, agent_id: str, tool_ids: List[str]) -> bool: ...
     def get_agents_by_tool(self, tool_id: str) -> List[AgentResponse]: ...
@@ -60,12 +60,15 @@ class AgentService(IAgentService):
         doc["_id"] = res.inserted_id
         doc["base_id"] = base_id_str
 
+        tool_ids = req.tools or []
+        tool_names = self._resolve_tool_names(tool_ids)
         system_prompt = build_system_prompt(
             name=req.name,
             role=req.role,
             goal=req.goal,
             backstory=req.backstory,
             personalities=req.personalities,
+            tools=tool_names,
         )
         return format_agent_response(doc, system_prompt=system_prompt)
 
@@ -76,18 +79,43 @@ class AgentService(IAgentService):
         else:
             return self.collection.find_one({"base_id": base_id}, sort=[("version", -1)])
 
+    def _resolve_tool_names(self, tool_ids: List[str]) -> List[str]:
+        if not tool_ids:
+            tool_ids = []
+        tool_names = []
+        if self.tools_collection:
+            for tid in tool_ids:
+                try:
+                    t_doc = self.tools_collection.find_one({"_id": ObjectId(tid)})
+                    if t_doc:
+                        tool_names.append(t_doc["name"])
+                except Exception:
+                    # Fallback: check if tid is actually the name
+                    t_doc = self.tools_collection.find_one({"name": tid})
+                    if t_doc:
+                        tool_names.append(t_doc["name"])
+        else:
+            # Fallback if no tools collection is available
+            tool_names = [str(tid) for tid in tool_ids]
+            
+        if "delegate_task" not in tool_names:
+            tool_names.append("delegate_task")
+            
+        return tool_names
+
     def _build_prompt_from_doc(self, doc: dict) -> str:
+        tool_ids = doc.get("tools", [])
+        tool_names = self._resolve_tool_names(tool_ids)
         return build_system_prompt(
             name=doc["name"],
             role=doc["role"],
             goal=doc["goal"],
             backstory=doc["backstory"],
             personalities=doc.get("personalities"),
+            tools=tool_names,
         )
 
     def get_agent(self, agent_id: str) -> Optional[AgentResponse]:
-        if agent_id in SYSTEM_AGENTS:
-            return SYSTEM_AGENTS[agent_id]
         doc = self._get_agent_doc(agent_id)
         if not doc:
             return None
@@ -153,7 +181,6 @@ class AgentService(IAgentService):
         latest_agents = list(self.collection.aggregate(pipeline))
         # System prompt is omitted in list view for performance
         db_agents = [format_agent_response(a["doc"]) for a in latest_agents]
-        all_agents = list(SYSTEM_AGENTS.values()) + db_agents
         
         if include_last_chat:
             from app.services.chat_service import ChatService
@@ -161,12 +188,12 @@ class AgentService(IAgentService):
             chats_coll = TenantCollection(db.get_chats_collection(), self.collection.org_id)
             chat_service = ChatService(self, chats_coll)
             
-            for agent in all_agents:
+            for agent in db_agents:
                 last_chats = chat_service.get_all_chats(agent_id=agent.id, preview=True, limit=1)
                 if last_chats:
                     agent.last_chat = last_chats[0]
                     
-        return all_agents
+        return db_agents
 
     def delete_agent(self, agent_id: str) -> bool:
         base_id, _ = parse_agent_id(agent_id)
@@ -216,60 +243,11 @@ class AgentService(IAgentService):
         latest_agents = list(self.collection.aggregate(pipeline))
         return [format_agent_response(a["doc"]) for a in latest_agents]
 
-    def get_runnable_agent(self, agent_id: Optional[str] = None) -> Agent:
-        if not agent_id:
-            model_name = os.getenv("LLM_MODEL", "x-ai/grok-4.1-fast")
-            api_key = os.getenv("OPENROUTER_API_KEY", "")
-
-            model = OpenRouterModel(
-                model_name,
-                provider=OpenRouterProvider(api_key=api_key),
-            )
-            
-            instructions = build_system_prompt(
-                name=BASE_AGENT.name,
-                role=BASE_AGENT.role,
-                goal=BASE_AGENT.goal,
-                backstory=BASE_AGENT.backstory,
-                personalities=BASE_AGENT.personalities
-            )
-            return Agent(
-                model=model,
-                instructions=instructions,
-                toolsets=[memory_toolset]
-            )
-            
-        if agent_id in SYSTEM_AGENTS:
-            agent_def = SYSTEM_AGENTS[agent_id]
-            # Creator agent has special logic
-            if agent_id == "agent-creator":
-                from app.services.agents.creator_agent import CreatorAgent
-                return CreatorAgent()
-            
-            # Others use the standard template
-            model_name = agent_def.llm_id or os.getenv("LLM_MODEL", "x-ai/grok-4.1-fast")
-            api_key = os.getenv("OPENROUTER_API_KEY", "")
-            model = OpenRouterModel(
-                model_name,
-                provider=OpenRouterProvider(api_key=api_key),
-            )
-            instructions = build_system_prompt(
-                name=agent_def.name,
-                role=agent_def.role,
-                goal=agent_def.goal,
-                backstory=agent_def.backstory,
-                personalities=agent_def.personalities
-            )
-            return Agent(
-                model=model,
-                instructions=instructions,
-                toolsets=[memory_toolset]
-            )
-
+    def get_runnable_agent(self, agent_id: str) -> Agent:
         doc = self._get_agent_doc(agent_id)
         if not doc:
-            raise ValueError("Agent not found")
-            
+            raise ValueError(f"Agent '{agent_id}' not found")
+
         llm = self.llm_service.get_llm(doc["llm_id"])
         if not llm:
             raise ValueError("LLM associated with Agent not found")
@@ -283,24 +261,14 @@ class AgentService(IAgentService):
         system_prompt = self._build_prompt_from_doc(doc)
         
         tool_ids = doc.get("tools", [])
-        tool_names = []
-        
-        if self.tools_collection and tool_ids:
-            for tid in tool_ids:
-                try:
-                    t_doc = self.tools_collection.find_one({"_id": ObjectId(tid)})
-                    if t_doc:
-                        tool_names.append(t_doc["name"])
-                except Exception:
-                    # Fallback: check if tid is actually the name
-                    t_doc = self.tools_collection.find_one({"name": tid})
-                    if t_doc:
-                        tool_names.append(t_doc["name"])
+        tool_names = self._resolve_tool_names(tool_ids)
 
-        dynamic_toolsets = get_toolsets_by_names(tool_names)
-        
+        # Retrieve only individual requested Tools (excluding delegate_task as it's passed via toolsets)
+        dynamic_tools = get_tools_by_names([t for t in tool_names if t != "delegate_task"])
+
         return Agent(
             model=model,
             instructions=system_prompt,
-            toolsets=dynamic_toolsets
+            tools=dynamic_tools,
+            toolsets=[delegation_toolset]
         )

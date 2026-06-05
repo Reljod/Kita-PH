@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 from pydantic_ai import Agent
 
 from app.db import db
-from app.routes import chat, memory, agent, llm, auth, user, organization, tool
+from app.routes import chat, memory, agent, llm, auth, user, organization, tool, file, event
 from app.routes.webhook import facebook
 from app.security import require_org_membership
 from fastapi import Depends
@@ -58,6 +58,8 @@ app.include_router(memory.router, dependencies=protected_deps)
 app.include_router(llm.router, dependencies=protected_deps)
 app.include_router(agent.router, dependencies=protected_deps)
 app.include_router(tool.router, dependencies=protected_deps)
+app.include_router(file.router, dependencies=protected_deps)
+app.include_router(event.router, dependencies=protected_deps)
 
 @app.get("/")
 def root():
@@ -68,5 +70,5 @@ def root():
 
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.environ.get("PORT", 8080))
+    port = int(os.environ.get("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)

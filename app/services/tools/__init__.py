@@ -61,3 +61,33 @@ def get_toolsets_by_names(names: List[str]) -> List[FunctionToolset]:
             continue
             
     return found_toolsets
+
+
+def get_tools_by_names(names: List[str]) -> List[Any]:
+    """
+    Returns a list of individual Tool objects from FunctionToolsets that match the given names.
+    """
+    found_tools = []
+    seen_names = set()
+    
+    for loader, module_name, is_pkg in pkgutil.iter_modules(__path__):
+        if module_name == "__init__":
+            continue
+            
+        try:
+            module = importlib.import_module(f".{module_name}", __package__)
+            
+            # Find FunctionToolsets in this module
+            for attr_name in dir(module):
+                attr = getattr(module, attr_name)
+                if isinstance(attr, FunctionToolset):
+                    # Extract requested tools from this toolset
+                    for t_name, t_obj in getattr(attr, "tools", {}).items():
+                        if t_name in names and t_name not in seen_names:
+                            found_tools.append(t_obj)
+                            seen_names.add(t_name)
+        except Exception:
+            continue
+            
+    return found_tools
+

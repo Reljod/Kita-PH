@@ -84,3 +84,4 @@ def format_agent_response(doc: dict, system_prompt: Optional[str] = None) -> Age
         created_at=doc.get("created_at", datetime.utcnow()),
         updated_at=doc.get("updated_at", datetime.utcnow())
     )
+

@@ -19,3 +19,8 @@ Personalities:
 {{tools}}
 [[/tools]]
 
+[[tool_instructions]]
+{{tool_instructions}}
+[[/tool_instructions]]
+
+
