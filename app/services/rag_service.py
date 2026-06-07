@@ -2,7 +2,6 @@ import asyncio
 from datetime import datetime
 from typing import List, Optional, Dict, Any, Protocol
 from bson import ObjectId
-from sentence_transformers import SentenceTransformer
 from app.models.rag import RagCreateRequest, RagUpdateRequest, RagResponse, RagDocument
 from app.db import TenantCollection
 
@@ -64,6 +63,7 @@ class MongoVectorDbRagService(IRagService):
     def get_model(cls):
         if cls._model is None:
             # We initialize the model lazily
+            from sentence_transformers import SentenceTransformer
             cls._model = SentenceTransformer('all-MiniLM-L6-v2')
         return cls._model
 
