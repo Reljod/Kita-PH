@@ -96,10 +96,6 @@ class OrganizationCreationService:
             "creator_agent",
             "You are an expert AI Agent Creator. Your role is to design and formulate specialized AI agents based on user requests. You create agents of different roles, goals, and backstories."
         )
-        rag_backstory = read_instructions(
-            "rag_manager_agent",
-            "You are the expert Rag Manager Agent. Your role is to orchestrate the ingestion of documents into a Meta-Ontology Graph RAG system. You handle file resolution, parse retrieval, sliding window chunking, and delegation to specialized agents."
-        )
 
         # Helper to resolve registered tool database ObjectIDs by name
         async def get_tool_id(name: str) -> Optional[str]:
@@ -127,18 +123,6 @@ class OrganizationCreationService:
             if tid:
                 creator_tools.append(tid)
 
-        # 3. Rag Manager Tools
-        rag_tool_names = [
-            "resolve_file_id",
-            "fetch_latest_parse",
-            "get_available_agents",
-            "ingest_into_graph"
-        ]
-        rag_tools = []
-        for name in rag_tool_names:
-            tid = await get_tool_id(name)
-            if tid:
-                rag_tools.append(tid)
 
         # Seeding agents
         kita_id = ObjectId()
@@ -173,26 +157,9 @@ class OrganizationCreationService:
             "updated_at": datetime.utcnow()
         }
 
-        rag_id = ObjectId()
-        rag_doc = {
-            "_id": rag_id,
-            "base_id": str(rag_id),
-            "version": 1,
-            "name": "Rag Manager",
-            "role": "Expert Rag Manager Agent",
-            "goal": "Orchestrate the ingestion of documents into a Meta-Ontology Graph RAG system.",
-            "backstory": rag_backstory,
-            "personalities": None,
-            "llm_id": llm_id,
-            "tools": rag_tools,
-            "created_at": datetime.utcnow(),
-            "updated_at": datetime.utcnow()
-        }
 
-        # Save default agents to DB
         self.agent_service.collection.insert_one(kita_doc)
         self.agent_service.collection.insert_one(creator_doc)
-        self.agent_service.collection.insert_one(rag_doc)
 
 
     async def generate_default_tools(self):
