@@ -1,5 +1,5 @@
 from bson import ObjectId
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any, Protocol
 from app.models.chat import ChatCreateRequest, ChatResponse, ChatContinueRequest, ChatDocument
 from pydantic_core import to_jsonable_python
@@ -143,7 +143,7 @@ class ChatService(IChatService):
         
         update_fields = {
             "messages": messages_dump,
-            "updated_at": datetime.utcnow()
+            "updated_at": datetime.now(timezone.utc)
         }
         
         if agent_id:

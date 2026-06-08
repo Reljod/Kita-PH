@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import List, Optional, Any
-from datetime import datetime
+from datetime import datetime, timezone
 
 class RagCreateRequest(BaseModel):
     title: str
@@ -30,8 +30,8 @@ class RagDocument(BaseModel):
     content: str
     embedding: Optional[List[float]] = None
     status: str = "pending"
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     question: Optional[str] = None
     answer: Optional[str] = None
     original_content: Optional[str] = None

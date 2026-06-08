@@ -1,7 +1,7 @@
 import os
 from bson import ObjectId
 from typing import List, Optional, Protocol
-from datetime import datetime
+from datetime import datetime, timezone
 from pydantic_ai import Agent
 from pydantic_ai.models.openrouter import OpenRouterModel
 from pydantic_ai.providers.openrouter import OpenRouterProvider
@@ -142,8 +142,8 @@ class AgentService(IAgentService):
                 "tools": req.tools if req.tools is not None else latest_doc.get("tools", []),
                 "base_id": base_id,
                 "version": new_version_num,
-                "created_at": latest_doc.get("created_at", datetime.utcnow()),
-                "updated_at": datetime.utcnow()
+                "created_at": latest_doc.get("created_at", datetime.now(timezone.utc)),
+                "updated_at": datetime.now(timezone.utc)
             }
             
             res = self.collection.insert_one(updated_data)
@@ -159,7 +159,7 @@ class AgentService(IAgentService):
             if req.personalities is not None: update_fields["personalities"] = req.personalities
             if req.llm_id is not None: update_fields["llm_id"] = req.llm_id
             if req.tools is not None: update_fields["tools"] = req.tools
-            update_fields["updated_at"] = datetime.utcnow()
+            update_fields["updated_at"] = datetime.now(timezone.utc)
             
             self.collection.update_one(
                 {"_id": latest_doc["_id"]},
@@ -209,7 +209,7 @@ class AgentService(IAgentService):
             {"_id": doc["_id"]},
             {
                 "$addToSet": {"tools": {"$each": tool_ids}},
-                "$set": {"updated_at": datetime.utcnow()}
+                "$set": {"updated_at": datetime.now(timezone.utc)}
             }
         )
         return True
@@ -223,7 +223,7 @@ class AgentService(IAgentService):
             {"_id": doc["_id"]},
             {
                 "$pull": {"tools": {"$in": tool_ids}},
-                "$set": {"updated_at": datetime.utcnow()}
+                "$set": {"updated_at": datetime.now(timezone.utc)}
             }
         )
         return True

@@ -2,7 +2,7 @@ from typing import Optional, Any, Dict, Protocol, List
 from app.services.web_search_service import WebSearchService
 from app.services.tools import get_available_tools
 from app.db import TenantCollection
-from datetime import datetime
+from datetime import datetime, timezone
 
 class IToolService(Protocol):
     async def web_search(
@@ -75,8 +75,8 @@ class ToolService(IToolService):
         self.collection.insert_one({
             "name": name,
             "description": description,
-            "created_at": datetime.utcnow(),
-            "updated_at": datetime.utcnow()
+            "created_at": datetime.now(timezone.utc),
+            "updated_at": datetime.now(timezone.utc)
         })
         return True
 

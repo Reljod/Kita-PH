@@ -1,5 +1,5 @@
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any, Protocol
 from bson import ObjectId
 from app.models.rag import RagCreateRequest, RagUpdateRequest, RagResponse, RagDocument
@@ -101,7 +101,7 @@ class MongoVectorDbRagService(IRagService):
         if not update_data:
             return self.get_rag(rag_id)
 
-        update_data["updated_at"] = datetime.utcnow()
+        update_data["updated_at"] = datetime.now(timezone.utc)
         if "content" in update_data:
             update_data["original_content"] = update_data["content"]
             update_data["status"] = "pending"
@@ -168,7 +168,7 @@ class MongoVectorDbRagService(IRagService):
             try:
                 self.collection.update_one(
                     {"_id": ObjectId(rag_id)},
-                    {"$set": {"status": "error", "updated_at": datetime.utcnow()}}
+                    {"$set": {"status": "error", "updated_at": datetime.now(timezone.utc)}}
                 )
             except:
                 pass
@@ -262,7 +262,7 @@ class MongoVectorDbRagService(IRagService):
             print(f"Failed to use cross-encoder for reranking: {re_err}")
 
         # Compute combined score: baseline score (cross-encoder or search_score) + recency boost
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         for idx, doc in enumerate(docs):
             # Recency score calculation
             created_at = doc.get("created_at") or now

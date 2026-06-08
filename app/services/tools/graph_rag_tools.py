@@ -3,7 +3,7 @@ import logfire
 from pydantic_ai import FunctionToolset, RunContext
 from pydantic import Field, BaseModel
 from typing import Annotated, Dict, Any, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.models.graph_rag import GraphDocument, GraphChunk, GraphEntity, GraphRelationship
 
@@ -69,7 +69,7 @@ async def ingest_into_graph(
             title=filename,
             metadata={
                 "source": "rag_manager_agent", 
-                "ingested_at": datetime.utcnow().isoformat(),
+                "ingested_at": datetime.now(timezone.utc).isoformat(),
                 "agent_id": agent_id_to_store,
                 "filename": filename
             }

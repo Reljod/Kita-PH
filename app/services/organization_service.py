@@ -1,5 +1,5 @@
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 from bson import ObjectId
 from app.db import Database
 from app.models.organization import (
@@ -17,8 +17,8 @@ class OrganizationService:
             org_code=org_in.org_code,
             org_members=[OrgMember(user_id=creator_id, role=OrgRole.ADMIN)],
             status="initializing",
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow()
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc)
         )
         org_dict = org_doc.model_dump()
         result = self.collection.insert_one(org_dict)
@@ -33,7 +33,7 @@ class OrganizationService:
             query = {"_id": org_id}
         result = self.collection.update_one(
             query,
-            {"$set": {"status": status, "updated_at": datetime.utcnow()}}
+            {"$set": {"status": status, "updated_at": datetime.now(timezone.utc)}}
         )
         return result.modified_count > 0
 
@@ -86,7 +86,7 @@ class OrganizationService:
         if not update_data:
             return self.get_org(org_id)
             
-        update_data["updated_at"] = datetime.utcnow()
+        update_data["updated_at"] = datetime.now(timezone.utc)
         
         result = self.collection.find_one_and_update(
             {"_id": ObjectId(org_id)},
@@ -103,7 +103,7 @@ class OrganizationService:
         if not update_data:
             return self.get_org(org_id)
             
-        set_data = {"updated_at": datetime.utcnow()}
+        set_data = {"updated_at": datetime.now(timezone.utc)}
         for k, v in update_data.items():
             set_data[f"integrations.{k}"] = v
             
@@ -130,13 +130,13 @@ class OrganizationService:
             # Update role
             self.collection.update_one(
                 {"_id": ObjectId(org_id), "org_members.user_id": member_in.user_id},
-                {"$set": {"org_members.$.role": member_in.role, "updated_at": datetime.utcnow()}}
+                {"$set": {"org_members.$.role": member_in.role, "updated_at": datetime.now(timezone.utc)}}
             )
         else:
             # Add member
             self.collection.update_one(
                 {"_id": ObjectId(org_id)},
-                {"$push": {"org_members": member_in.model_dump()}, "$set": {"updated_at": datetime.utcnow()}}
+                {"$push": {"org_members": member_in.model_dump()}, "$set": {"updated_at": datetime.now(timezone.utc)}}
             )
             
         return self.get_org(org_id)
@@ -144,7 +144,7 @@ class OrganizationService:
     def revoke_member(self, org_id: str, user_id: str) -> Optional[OrganizationResponse]:
         result = self.collection.find_one_and_update(
             {"_id": ObjectId(org_id)},
-            {"$pull": {"org_members": {"user_id": user_id}}, "$set": {"updated_at": datetime.utcnow()}},
+            {"$pull": {"org_members": {"user_id": user_id}}, "$set": {"updated_at": datetime.now(timezone.utc)}},
             return_document=True
         )
         if result:

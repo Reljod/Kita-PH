@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 class Token(BaseModel):
     access_token: str
@@ -29,4 +29,4 @@ class TokenDocument(BaseModel):
     refresh_token: str
     is_revoked: bool = False
     expires_at: datetime
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

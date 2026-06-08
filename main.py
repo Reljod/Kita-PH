@@ -1,10 +1,15 @@
 import logfire
 import os
+import warnings
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from pydantic_ai import Agent
+
+# Suppress deprecation warnings from websockets/uvicorn
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="websockets")
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="uvicorn")
 
 from app.db import db
 from app.routes import chat, memory, agent, llm, auth, user, organization, tool, file, event
@@ -32,7 +37,7 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-logfire.configure()
+logfire.configure(distributed_tracing=False)
 logfire.instrument_pydantic_ai()
 logfire.instrument_fastapi(app)
 
