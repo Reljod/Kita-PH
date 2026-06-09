@@ -1,29 +1,43 @@
 import logfire
 import os
+import warnings
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from pydantic_ai import Agent
 
-from app.db import db
-from app.routes import chat, memory, agent, llm, auth, user, organization, tool, file, event
-from app.routes.webhook import facebook
-from app.security import require_org_membership
-from fastapi import Depends
+# Suppress deprecation warnings from websockets/uvicorn
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="websockets")
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="uvicorn")
 
 # Load environment variables, prioritizing .env.local if it exists
 load_dotenv(".env.local")
 load_dotenv()
 
+from app.db import db
+from app.routes import chat, memory, agent, llm, auth, user, organization, tool, file, event
+from app.routes.webhook import facebook
+from app.security import require_org_membership
+from fastapi import Depends
+from app.services.redis_service import RedisService
+from app.middleware.api_key_auth import ApiKeyAuthMiddleware
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: Connect to MongoDB
+    # Startup: Connect to MongoDB and Redis
     db.connect()
+    try:
+        redis_client = RedisService.get_client()
+        await redis_client.ping()
+        print("Successfully connected to Redis.")
+    except Exception as e:
+        print(f"Failed to connect to Redis during startup: {e}")
     yield
-    # Shutdown: Close MongoDB connection
+    # Shutdown: Close connections
     db.close()
+    await RedisService.close()
 
 app = FastAPI(
     title="Kita API", 
@@ -32,7 +46,7 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-logfire.configure()
+logfire.configure(distributed_tracing=False)
 logfire.instrument_pydantic_ai()
 logfire.instrument_fastapi(app)
 
@@ -56,6 +70,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.add_middleware(ApiKeyAuthMiddleware)
 
 
 # Include Routers

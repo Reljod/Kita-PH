@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 
 class GraphNode(BaseModel):
     id: str
@@ -17,7 +17,7 @@ class GraphDocument(BaseModel):
     id: str
     title: str
     metadata: Dict[str, Any] = Field(default_factory=dict)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class GraphChunk(BaseModel):
     id: str

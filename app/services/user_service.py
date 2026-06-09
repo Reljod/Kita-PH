@@ -1,5 +1,5 @@
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from bson import ObjectId
 import bcrypt
 from app.db import Database
@@ -29,8 +29,8 @@ class UserService:
         hashed_password = self.hash_password(user_in.password)
         user_dict = user_in.model_dump()
         user_dict["password"] = hashed_password
-        user_dict["created_at"] = datetime.utcnow()
-        user_dict["updated_at"] = datetime.utcnow()
+        user_dict["created_at"] = datetime.now(timezone.utc)
+        user_dict["updated_at"] = datetime.now(timezone.utc)
         
         result = self.collection.insert_one(user_dict)
         user_dict["id"] = str(result.inserted_id)
@@ -51,7 +51,7 @@ class UserService:
 
     def update_user(self, user_id: str, user_in: UserUpdate) -> Optional[UserResponse]:
         update_data = user_in.model_dump(exclude_unset=True)
-        update_data["updated_at"] = datetime.utcnow()
+        update_data["updated_at"] = datetime.now(timezone.utc)
         
         result = self.collection.find_one_and_update(
             {"_id": ObjectId(user_id)},
@@ -71,6 +71,6 @@ class UserService:
         hashed_password = self.hash_password(password_in.new_password)
         self.collection.update_one(
             {"_id": ObjectId(user_id)},
-            {"$set": {"password": hashed_password, "updated_at": datetime.utcnow()}}
+            {"$set": {"password": hashed_password, "updated_at": datetime.now(timezone.utc)}}
         )
         return True

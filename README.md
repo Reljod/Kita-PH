@@ -1,77 +1,75 @@
-# Kita API
+# 🌌 Kita API
 
-Modern FastAPI project for LLM-powered services, now managed with `uv`.
+Kita API is a high-performance, production-ready backend framework for LLM-powered services. Built on top of **FastAPI** and optimized with the lightning-fast **`uv`** package manager, it serves as the core agent execution and memory synchronization service for the Kita ecosystem.
 
-## Running the Application
+---
 
-To run the FastAPI server, use `uv run`:
+## ⚡ Core Features
 
-```bash
-uv run uvicorn main:app --reload
-```
+- **🧠 Multi-Agent Execution**: Built-in support for orchestrating complex LLM workloads powered by `pydantic-ai`.
+- **📁 Advanced File Uploading**: Efficient upload mechanisms for standard and large files (with standard binary PUT and resumable `TUS` protocol configurations).
+- **💾 Semantic memory (RAG)**: Organization-isolated vector storage and retrieval.
+- **⚡ Background Workflows**: Event-driven scheduling and long-running task offloading using Hatchet.
+- **🔌 Enterprise Integration**: Complete webhook support (e.g., Facebook Messenger, events framework).
+- **🔒 API Authentication Middleware**: High-performance API authentication validating client IDs and encrypted API keys stored in MongoDB with low-latency Redis caching.
 
-## Dependency Management
+---
 
-This project uses `uv` for lightning-fast dependency management.
+## 🛠️ Technology Stack
 
-### Adding New Packages
-```bash
-uv add <package_name>
-```
+- **Framework**: [FastAPI](https://fastapi.tiangolo.com/) (Python >= 3.13)
+- **Dependency Manager**: [Astral `uv`](https://docs.astral.sh/uv/)
+- **Orchestration / Agents**: [Pydantic AI](https://ai.pydantic.dev/)
+- **Database**: [MongoDB](https://www.mongodb.com/) (using `pymongo`)
+- **Caching & Rate Limiting**: [Redis](https://redis.io/)
+- **Task Queue**: [Hatchet SDK](https://docs.hatchet.run/)
+- **Observability**: [Logfire](https://logfire.dev/)
+- **Graph Database**: [Neo4j](https://neo4j.com/)
 
-### Syncing the Environment
-```bash
-uv sync
-```
+---
 
-### Running Scripts
-```bash
-## File Upload API
+## 📖 Project Documentation
 
-The API provides two methods for file uploads based on the file size.
+To make getting started and maintaining Kita API as smooth as possible, the documentation is divided into the following guides:
 
-### 1. Initiate Upload
-Send a `POST` request to `/files/upload` with the file metadata:
-```bash
-curl -X POST "http://localhost:8000/files/upload" \
-  -H "Authorization: Bearer <your_auth_token>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "filename": "document.pdf",
-    "size": 1048576,
-    "content_type": "application/pdf"
-  }'
-```
+### 💻 [Local Development Guide](./DEVELOPMENT.md)
+Contains step-by-step setup guides for running the API locally, managing environment variables, utilizing `uv` for dependencies, and **generating or calling credentials for API clients**.
 
-The response will provide an `upload_url`, `method`, and `token`.
+### 🚀 [Production Deployment Guide](./DEPLOYMENT.md)
+Covers production deployment options, including Docker configurations, PaaS (Heroku/Render/Dokku) workflows, configuration check-lists, and exporting dependencies for production.
 
-### 2. Perform the Upload
+---
 
-#### **Standard Upload (Files < 6MB)**
-The `method` will be `POST`. You must use **`PUT`** and **Raw Binary** data for the best consistency.
-```bash
-curl -X PUT "URL_FROM_API" \
-  --data-binary "@/path/to/document.pdf"
-```
+## 🚦 Quick Start
 
-#### **Resumable Upload (Files ≥ 6MB)**
-The `method` will be `TUS`. You must use the **TUS protocol** (recommended: `tus-js-client`).
+For full setup steps, environment variables, and dependencies, refer to [DEVELOPMENT.md](./DEVELOPMENT.md).
 
-**Manual Example (via curl):**
-```bash
-# Step A: Initiate resumable session
-curl -X POST "URL_FROM_API" \
-  -H "Authorization: Bearer <token_from_api>" \
-  -H "Tus-Resumable: 1.0.0" \
-  -H "Upload-Length: <file_size>" \
-  -H "Content-Type: application/offset+octet-stream" \
-  -i
+1. **Setup Environment**
+   ```bash
+   cp .env.example .env.local
+   # Update variables in .env.local
+   ```
 
-# Note the 'Location' header in the response, then:
-# Step B: Upload data
-curl -X PATCH "<location_header_url>" \
-  -H "Tus-Resumable: 1.0.0" \
-  -H "Upload-Offset: 0" \
-  -H "Content-Type: application/offset+octet-stream" \
-  --data-binary "@/path/to/large_file.mp4"
-```
+2. **Sync Virtual Environment**
+   ```bash
+   uv sync
+   ```
+
+3. **Run Application**
+   ```bash
+   uv run uvicorn main:app --reload
+   ```
+
+---
+
+## 🗺️ Repository Structure
+
+* `app/` — Application source code.
+  * [middleware/](./app/middleware) — Request interceptors, including client-key validation.
+  * [routes/](./app/routes) — API routers (chats, files, events, memory, etc.).
+  * [services/](./app/services) — Core business services (caching, encryption, etc.).
+  * [db.py](./app/db.py) — MongoDB connection layer & Tenant wrapper.
+* `scripts/` — Utility automation scripts.
+  * [generate_client.py](./scripts/generate_client.py) — CLI to issue credentials to API clients.
+* [main.py](./main.py) — Application entrypoint and middleware definition.
+* [pyproject.toml](./pyproject.toml) — Project dependencies managed by `uv`.

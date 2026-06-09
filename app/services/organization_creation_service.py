@@ -1,5 +1,5 @@
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from app.services.llm_service import ILlmService
 from app.services.agent_service import IAgentService
@@ -137,8 +137,8 @@ class OrganizationCreationService:
             "personalities": ["Helpful", "Professional", "Concise"],
             "llm_id": llm_id,
             "tools": kita_tools,
-            "created_at": datetime.utcnow(),
-            "updated_at": datetime.utcnow()
+            "created_at": datetime.now(timezone.utc),
+            "updated_at": datetime.now(timezone.utc)
         }
         
         creator_id = ObjectId()
@@ -153,8 +153,8 @@ class OrganizationCreationService:
             "personalities": None,
             "llm_id": llm_id,
             "tools": creator_tools,
-            "created_at": datetime.utcnow(),
-            "updated_at": datetime.utcnow()
+            "created_at": datetime.now(timezone.utc),
+            "updated_at": datetime.now(timezone.utc)
         }
 
 

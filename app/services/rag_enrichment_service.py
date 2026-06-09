@@ -1,6 +1,6 @@
 import os
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent
 from pydantic_ai.models.openrouter import OpenRouterModel
@@ -39,7 +39,7 @@ class RagEnrichmentService:
             return None
 
         # Determine date representation
-        created_at = doc.get("created_at") or datetime.utcnow()
+        created_at = doc.get("created_at") or datetime.now(timezone.utc)
         date_str = created_at.strftime("%Y-%m-%d")
 
         raw_content = doc.get("original_content") or doc.get("content")
@@ -80,7 +80,7 @@ class RagEnrichmentService:
             "answer": answer,
             "embedding": embedding.tolist(),
             "status": "completed",
-            "updated_at": datetime.utcnow()
+            "updated_at": datetime.now(timezone.utc)
         }
 
         self.collection.update_one(

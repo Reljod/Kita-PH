@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Any, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 def parse_agent_id(agent_id_str: str) -> tuple[str, Optional[int]]:
     if "-v" in agent_id_str:
@@ -60,8 +60,8 @@ class AgentDocument(BaseModel):
     personalities: Optional[List[str]] = None
     llm_id: str
     tools: Optional[List[str]] = Field(default_factory=list)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 def format_agent_response(doc: dict, system_prompt: Optional[str] = None) -> AgentResponse:
     base_id = doc.get("base_id") or str(doc["_id"])
@@ -81,7 +81,7 @@ def format_agent_response(doc: dict, system_prompt: Optional[str] = None) -> Age
         system_prompt=system_prompt,
         llm_id=doc["llm_id"],
         tools=doc.get("tools", []),
-        created_at=doc.get("created_at", datetime.utcnow()),
-        updated_at=doc.get("updated_at", datetime.utcnow())
+        created_at=doc.get("created_at", datetime.now(timezone.utc)),
+        updated_at=doc.get("updated_at", datetime.now(timezone.utc))
     )
 
