@@ -7,9 +7,7 @@ from app.security import get_current_org_id
 
 router = APIRouter(prefix="/llm", tags=["LLM Management"])
 
-def get_llm_service(org_id: str = Depends(get_current_org_id)) -> ILlmService:
-    collection = TenantCollection(db.get_llms_collection(), org_id)
-    return LlmService(collection)
+from app.dependencies import get_llm_service
 
 @router.post("/", response_model=LlmResponse)
 def add_llm(req: LlmCreateRequest, service: ILlmService = Depends(get_llm_service)):

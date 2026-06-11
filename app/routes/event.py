@@ -6,8 +6,7 @@ from pydantic import ValidationError
 
 router = APIRouter(prefix="/events", tags=["Events"])
 
-def get_event_service() -> IEventService:
-    return HatchetEventService()
+from app.dependencies import get_event_service
 
 @router.post("/push", status_code=status.HTTP_200_OK)
 async def push_event(

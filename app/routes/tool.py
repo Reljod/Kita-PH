@@ -12,17 +12,7 @@ from app.security import get_current_org_id
 
 router = APIRouter(prefix="/tool", tags=["Tool Management"])
 
-def get_tool_service(org_id: str = Depends(get_current_org_id)) -> IToolService:
-    web_search_service = SerperSearchService()
-    collection = TenantCollection(db.get_tools_collection(), org_id)
-    return ToolService(web_search_service=web_search_service, collection=collection)
-
-def get_agent_service(org_id: str = Depends(get_current_org_id)) -> IAgentService:
-    llm_service_coll = TenantCollection(db.get_llms_collection(), org_id)
-    llm_service = LlmService(llm_service_coll)
-    collection = TenantCollection(db.get_agents_collection(), org_id)
-    tools_collection = TenantCollection(db.get_tools_collection(), org_id)
-    return AgentService(llm_service=llm_service, collection=collection, tools_collection=tools_collection)
+from app.dependencies import get_tool_service, get_agent_service
 
 @router.get("/", response_model=List[ToolResponse])
 async def get_tools(service: IToolService = Depends(get_tool_service)):

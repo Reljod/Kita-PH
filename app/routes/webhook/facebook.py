@@ -4,8 +4,7 @@ from typing import Optional
 
 router = APIRouter(prefix="/webhook/facebook", tags=["webhook"])
 
-def get_facebook_service() -> FacebookService:
-    return FacebookService()
+from app.dependencies import get_facebook_service
 
 @router.get("/")
 def verify(

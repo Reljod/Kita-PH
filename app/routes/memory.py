@@ -2,30 +2,11 @@ from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, status, 
 from typing import List, Optional
 from app.models.rag import RagCreateRequest, RagResponse, RagUpdateRequest
 from app.models.graph_rag import GraphRagSearchResult
-from app.services.rag_service import MongoVectorDbRagService, IRagService
-from app.services.graph_rag_service import Neo4JGraphRagService, GraphRagService
-from app.db import db, TenantCollection
-from app.security import get_current_org_id
-import os
+from app.services.rag_service import IRagService
+from app.services.graph_rag_service import GraphRagService
+from app.dependencies import get_rag_service, get_graph_rag_service
 
 router = APIRouter(prefix="/memory", tags=["Memory"])
-
-def get_rag_service(
-    org_id: str = Depends(get_current_org_id),
-    x_agent_id: Optional[str] = Header(None, alias="x-agent-id")
-) -> IRagService:
-    collection = TenantCollection(db.get_rag_collection(), org_id)
-    return MongoVectorDbRagService(collection, agent_id=x_agent_id)
-
-def get_graph_rag_service(
-    org_id: str = Depends(get_current_org_id)
-) -> GraphRagService:
-    uri = os.getenv("NEO4J_URI")
-    user = os.getenv("NEO4J_USERNAME")
-    password = os.getenv("NEO4J_PASSWORD")
-    if not all([uri, user, password]):
-        raise HTTPException(status_code=500, detail="Graph RAG environment variables are not properly configured.")
-    return Neo4JGraphRagService(uri, user, password, org_id)
 
 @router.post("", response_model=RagResponse, status_code=status.HTTP_201_CREATED)
 async def create_rag(

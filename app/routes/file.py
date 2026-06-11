@@ -8,16 +8,7 @@ from app.security import get_current_org_id
 
 router = APIRouter(prefix="/files", tags=["Files"])
 
-def get_event_service() -> IEventService:
-    return HatchetEventService()
-
-def get_file_service(
-    org_id: str = Depends(get_current_org_id),
-    x_agent_id: Optional[str] = Header(None, alias="x-agent-id"),
-    event_service: IEventService = Depends(get_event_service)
-) -> FileService:
-    collection = TenantCollection(db.get_files_collection(), org_id)
-    return FileService(collection, org_id, event_service, agent_id=x_agent_id)
+from app.dependencies import get_file_service
 
 @router.post("/upload", response_model=FileUploadResponse, status_code=status.HTTP_201_CREATED)
 async def initiate_upload(
