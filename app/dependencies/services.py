@@ -56,46 +56,103 @@ def get_web_search_service() -> SerperSearchService:
     return _web_search_service
 
 
+# --- Service Registry / Singleton Container ---
+
+class ServiceRegistry:
+    def __init__(self, org_id: str):
+        self.org_id = org_id
+
+        # Global singletons
+        self.event_service = get_event_service()
+        self.facebook_service = get_facebook_service()
+        self.org_service = get_org_service()
+        self.web_search_service = get_web_search_service()
+
+        # Tenant-scoped services
+        self.llm_service = LlmService(TenantCollection(db.get_llms_collection(), org_id))
+        
+        self.agent_service = AgentService(
+            llm_service=self.llm_service,
+            collection=TenantCollection(db.get_agents_collection(), org_id),
+            tools_collection=TenantCollection(db.get_tools_collection(), org_id)
+        )
+        
+        self.tool_service = ToolService(
+            web_search_service=self.web_search_service,
+            collection=TenantCollection(db.get_tools_collection(), org_id)
+        )
+        
+        self.file_service = FileService(
+            collection=TenantCollection(db.get_files_collection(), org_id),
+            org_id=org_id,
+            event_service=self.event_service
+        )
+        
+        self.parse_service = LlamaParseService(
+            parse_collection=TenantCollection(db.get_file_parse_collection(), org_id),
+            file_service=self.file_service,
+            event_service=self.event_service
+        )
+        
+        import os
+        neo4j_uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
+        neo4j_user = os.getenv("NEO4J_USERNAME") or os.getenv("NEO4J_USER", "neo4j")
+        neo4j_password = os.getenv("NEO4J_PASSWORD", "password")
+        self.graph_rag_service = Neo4JGraphRagService(neo4j_uri, neo4j_user, neo4j_password, org_id)
+        
+        self.rag_service = MongoVectorDbRagService(
+            collection=TenantCollection(db.get_rag_collection(), org_id)
+        )
+        
+        self.chat_service = ChatService(
+            agent_service=self.agent_service,
+            collection=TenantCollection(db.get_chats_collection(), org_id),
+            file_service=self.file_service,
+            parse_service=self.parse_service,
+            graph_rag_service=self.graph_rag_service,
+            rag_service=self.rag_service
+        )
+
+
+_registries: dict[str, ServiceRegistry] = {}
+
+
+def get_services(org_id: str) -> ServiceRegistry:
+    if org_id not in _registries:
+        _registries[org_id] = ServiceRegistry(org_id)
+    return _registries[org_id]
+
+
 # --- Scoped / Tenant Dependencies ---
 
 def get_llm_service(org_id: str = Depends(get_current_org_id)) -> ILlmService:
-    collection = TenantCollection(db.get_llms_collection(), org_id)
-    return LlmService(collection)
+    return get_services(org_id).llm_service
 
 
 def get_agent_service(
-    org_id: str = Depends(get_current_org_id),
-    llm_service: ILlmService = Depends(get_llm_service)
+    org_id: str = Depends(get_current_org_id)
 ) -> IAgentService:
-    collection = TenantCollection(db.get_agents_collection(), org_id)
-    tools_collection = TenantCollection(db.get_tools_collection(), org_id)
-    return AgentService(llm_service=llm_service, collection=collection, tools_collection=tools_collection)
+    return get_services(org_id).agent_service
 
 
 def get_tool_service(
-    org_id: str = Depends(get_current_org_id),
-    web_search_service: SerperSearchService = Depends(get_web_search_service)
+    org_id: str = Depends(get_current_org_id)
 ) -> IToolService:
-    collection = TenantCollection(db.get_tools_collection(), org_id)
-    return ToolService(web_search_service=web_search_service, collection=collection)
+    return get_services(org_id).tool_service
 
 
 def get_file_service(
     org_id: str = Depends(get_current_org_id),
-    x_agent_id: Optional[str] = Header(None, alias="x-agent-id"),
-    event_service: IEventService = Depends(get_event_service)
+    x_agent_id: Optional[str] = Header(None, alias="x-agent-id")
 ) -> FileService:
-    collection = TenantCollection(db.get_files_collection(), org_id)
-    return FileService(collection, org_id, event_service, agent_id=x_agent_id)
+    return get_services(org_id).file_service
 
 
 def get_parse_service(
     org_id: str = Depends(get_current_org_id),
-    file_service: FileService = Depends(get_file_service),
-    event_service: IEventService = Depends(get_event_service)
+    x_agent_id: Optional[str] = Header(None, alias="x-agent-id")
 ) -> LlamaParseService:
-    parse_coll = TenantCollection(db.get_file_parse_collection(), org_id)
-    return LlamaParseService(parse_coll, file_service, event_service)
+    return get_services(org_id).parse_service
 
 
 def get_graph_rag_service(
@@ -108,39 +165,27 @@ def get_graph_rag_service(
     neo4j_password = os.getenv("NEO4J_PASSWORD")
     if not all([neo4j_uri, neo4j_user, neo4j_password]):
         raise HTTPException(status_code=500, detail="Graph RAG environment variables are not properly configured.")
-    return Neo4JGraphRagService(neo4j_uri, neo4j_user, neo4j_password, org_id)
+    return get_services(org_id).graph_rag_service
 
 
 def get_rag_service(
     org_id: str = Depends(get_current_org_id),
     x_agent_id: Optional[str] = Header(None, alias="x-agent-id")
 ) -> IRagService:
-    collection = TenantCollection(db.get_rag_collection(), org_id)
-    return MongoVectorDbRagService(collection, agent_id=x_agent_id)
+    return get_services(org_id).rag_service
 
 
 def get_agent_rag_service(
     agent_id: str,
     org_id: str = Depends(get_current_org_id)
 ) -> IRagService:
-    collection = TenantCollection(db.get_rag_collection(), org_id)
-    return MongoVectorDbRagService(collection, agent_id=agent_id)
+    return get_services(org_id).rag_service
 
 
 def get_chat_service(
     org_id: str = Depends(get_current_org_id),
-    agent_service: IAgentService = Depends(get_agent_service),
-    file_service: FileService = Depends(get_file_service),
-    parse_service: LlamaParseService = Depends(get_parse_service),
-    graph_rag_service: Neo4JGraphRagService = Depends(get_graph_rag_service),
-    rag_service: IRagService = Depends(get_rag_service)
+    x_agent_id: Optional[str] = Header(None, alias="x-agent-id")
 ) -> IChatService:
-    collection = TenantCollection(db.get_chats_collection(), org_id)
-    return ChatService(
-        agent_service=agent_service,
-        collection=collection,
-        file_service=file_service,
-        parse_service=parse_service,
-        graph_rag_service=graph_rag_service,
-        rag_service=rag_service
-    )
+    return get_services(org_id).chat_service
+
+

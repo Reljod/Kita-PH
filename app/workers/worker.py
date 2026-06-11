@@ -1,3 +1,12 @@
+import os
+import warnings
+
+# Disable gRPC fork handlers to suppress fork warnings on MacOS
+os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "0"
+
+# Suppress deprecation warnings from libraries
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="hatchet_sdk")
+
 import logfire
 from dotenv import load_dotenv
 from app.db import db

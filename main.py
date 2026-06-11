@@ -1,15 +1,20 @@
-import logfire
 import os
 import warnings
+
+# Disable gRPC fork handlers to suppress fork warnings on MacOS
+os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "0"
+
+# Suppress deprecation warnings from libraries
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="websockets")
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="uvicorn")
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="hatchet_sdk")
+
+import logfire
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
-from pydantic_ai import Agent
 
-# Suppress deprecation warnings from websockets/uvicorn
-warnings.filterwarnings("ignore", category=DeprecationWarning, module="websockets")
-warnings.filterwarnings("ignore", category=DeprecationWarning, module="uvicorn")
 
 # Load environment variables, prioritizing .env.local if it exists
 load_dotenv(".env.local")

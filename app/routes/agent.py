@@ -116,24 +116,25 @@ async def create_agent_rag(
         raise HTTPException(status_code=500, detail=f"Error creating agent memory: {str(e)}")
 
 @router.get("/{agent_id}/memory", response_model=List[RagResponse])
-async def get_all_agent_rags(rag_service: IRagService = Depends(get_agent_rag_service)):
-    return rag_service.get_all_rags()
+async def get_all_agent_rags(agent_id: str, rag_service: IRagService = Depends(get_agent_rag_service)):
+    return rag_service.get_all_rags(agent_id=agent_id)
 
 @router.get("/{agent_id}/memory/search", response_model=List[RagResponse])
 async def search_agent_memory(
+    agent_id: str,
     query: str = Query(..., description="The search query to find relevant information in memory."), 
     limit: int = Query(5, description="The maximum number of results to return."), 
     rag_service: IRagService = Depends(get_agent_rag_service)
 ):
     try:
-        return await rag_service.search(query, limit=limit)
+        return await rag_service.search(query, limit=limit, agent_id=agent_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error searching agent memory: {str(e)}")
 
 @router.get("/{agent_id}/memory/{rag_id}", response_model=RagResponse)
-async def get_agent_rag(rag_id: str, rag_service: IRagService = Depends(get_agent_rag_service)):
+async def get_agent_rag(agent_id: str, rag_id: str, rag_service: IRagService = Depends(get_agent_rag_service)):
     try:
-        rag = rag_service.get_rag(rag_id)
+        rag = rag_service.get_rag(rag_id, agent_id=agent_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
         
@@ -144,13 +145,14 @@ async def get_agent_rag(rag_id: str, rag_service: IRagService = Depends(get_agen
 
 @router.put("/{agent_id}/memory/{rag_id}", response_model=RagResponse)
 async def update_agent_rag(
+    agent_id: str,
     rag_id: str, 
     req: RagUpdateRequest, 
     background_tasks: BackgroundTasks,
     rag_service: IRagService = Depends(get_agent_rag_service)
 ):
     try:
-        rag = await rag_service.edit_rag(rag_id, req)
+        rag = await rag_service.edit_rag(rag_id, req, agent_id=agent_id)
         if not rag:
             raise HTTPException(status_code=404, detail="Memory not found")
             
@@ -165,9 +167,9 @@ async def update_agent_rag(
         raise HTTPException(status_code=500, detail=f"Error updating agent memory: {str(e)}")
 
 @router.delete("/{agent_id}/memory/{rag_id}")
-async def delete_agent_rag(rag_id: str, rag_service: IRagService = Depends(get_agent_rag_service)):
+async def delete_agent_rag(agent_id: str, rag_id: str, rag_service: IRagService = Depends(get_agent_rag_service)):
     try:
-        success = await rag_service.delete_rag(rag_id)
+        success = await rag_service.delete_rag(rag_id, agent_id=agent_id)
         if not success:
             raise HTTPException(status_code=404, detail="Memory not found")
         return {"message": "Memory deleted successfully"}

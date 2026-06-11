@@ -8,17 +8,17 @@ from app.db import TenantCollection
 class IRagService(Protocol):
     async def add_rag(self, req: RagCreateRequest) -> RagResponse:
         ...
-    async def edit_rag(self, rag_id: str, req: RagUpdateRequest) -> Optional[RagResponse]:
+    async def edit_rag(self, rag_id: str, req: RagUpdateRequest, agent_id: Optional[str] = None) -> Optional[RagResponse]:
         ...
-    async def delete_rag(self, rag_id: str) -> bool:
+    async def delete_rag(self, rag_id: str, agent_id: Optional[str] = None) -> bool:
         ...
-    def get_rag(self, rag_id: str) -> Optional[RagResponse]:
+    def get_rag(self, rag_id: str, agent_id: Optional[str] = None) -> Optional[RagResponse]:
         ...
-    def get_all_rags(self) -> List[RagResponse]:
+    def get_all_rags(self, agent_id: Optional[str] = None) -> List[RagResponse]:
         ...
     async def update_embedding(self, rag_id: str):
         ...
-    async def search(self, query: str, limit: int = 5) -> List[RagResponse]:
+    async def search(self, query: str, limit: int = 5, agent_id: Optional[str] = None) -> List[RagResponse]:
         ...
 
 def format_rag_response(doc: Dict[str, Any]) -> RagResponse:
@@ -39,21 +39,20 @@ class MongoVectorDbRagService(IRagService):
     _model = None
     _reranker = None
 
-    def __init__(self, collection: TenantCollection, agent_id: Optional[str] = None):
+    def __init__(self, collection: TenantCollection):
         self.collection = collection
-        self.agent_id = agent_id
 
-    def _get_agent_filter(self) -> dict:
+    def _get_agent_filter(self, agent_id: Optional[str]) -> dict:
         """Returns a MongoDB filter query matching this agent's base_id, versioned id, or None."""
-        if not self.agent_id:
+        if not agent_id:
             return {}
             
         from app.models.agent import parse_agent_id
-        base_id = parse_agent_id(self.agent_id)[0]
+        base_id = parse_agent_id(agent_id)[0]
         
         return {
             "$or": [
-                {"agent_id": self.agent_id},
+                {"agent_id": agent_id},
                 {"agent_id": base_id},
                 {"agent_id": {"$regex": f"^{base_id}(-v\\d+)?$"}}
             ]
@@ -76,7 +75,7 @@ class MongoVectorDbRagService(IRagService):
 
     async def add_rag(self, req: RagCreateRequest) -> RagResponse:
         from app.models.agent import parse_agent_id
-        raw_agent = req.agent_id or self.agent_id
+        raw_agent = req.agent_id
         agent_id = parse_agent_id(raw_agent)[0] if raw_agent else None
 
         new_rag = RagDocument(
@@ -91,7 +90,7 @@ class MongoVectorDbRagService(IRagService):
         doc["_id"] = res.inserted_id
         return format_rag_response(doc)
 
-    async def edit_rag(self, rag_id: str, req: RagUpdateRequest) -> Optional[RagResponse]:
+    async def edit_rag(self, rag_id: str, req: RagUpdateRequest, agent_id: Optional[str] = None) -> Optional[RagResponse]:
         try:
             obj_id = ObjectId(rag_id)
         except Exception:
@@ -99,7 +98,7 @@ class MongoVectorDbRagService(IRagService):
 
         update_data = {k: v for k, v in req.model_dump().items() if v is not None}
         if not update_data:
-            return self.get_rag(rag_id)
+            return self.get_rag(rag_id, agent_id=agent_id)
 
         update_data["updated_at"] = datetime.now(timezone.utc)
         if "content" in update_data:
@@ -107,38 +106,38 @@ class MongoVectorDbRagService(IRagService):
             update_data["status"] = "pending"
 
         query = {"_id": obj_id}
-        if self.agent_id:
-            query = {"$and": [{"_id": obj_id}, self._get_agent_filter()]}
+        if agent_id:
+            query = {"$and": [{"_id": obj_id}, self._get_agent_filter(agent_id)]}
 
         self.collection.update_one(
             query,
             {"$set": update_data}
         )
         
-        return self.get_rag(rag_id)
+        return self.get_rag(rag_id, agent_id=agent_id)
 
-    async def delete_rag(self, rag_id: str) -> bool:
+    async def delete_rag(self, rag_id: str, agent_id: Optional[str] = None) -> bool:
         try:
             obj_id = ObjectId(rag_id)
         except Exception:
             raise ValueError("Invalid RAG ID")
         
         query = {"_id": obj_id}
-        if self.agent_id:
-            query = {"$and": [{"_id": obj_id}, self._get_agent_filter()]}
+        if agent_id:
+            query = {"$and": [{"_id": obj_id}, self._get_agent_filter(agent_id)]}
             
         res = self.collection.delete_one(query)
         return res.deleted_count > 0
 
-    def get_rag(self, rag_id: str) -> Optional[RagResponse]:
+    def get_rag(self, rag_id: str, agent_id: Optional[str] = None) -> Optional[RagResponse]:
         try:
             obj_id = ObjectId(rag_id)
         except Exception:
             raise ValueError("Invalid RAG ID")
             
         query = {"_id": obj_id}
-        if self.agent_id:
-            agent_filter = self._get_agent_filter()
+        if agent_id:
+            agent_filter = self._get_agent_filter(agent_id)
             agent_filter["$or"].append({"agent_id": None})
             query = {"$and": [{"_id": obj_id}, agent_filter]}
             
@@ -148,10 +147,10 @@ class MongoVectorDbRagService(IRagService):
             
         return format_rag_response(doc)
 
-    def get_all_rags(self) -> List[RagResponse]:
+    def get_all_rags(self, agent_id: Optional[str] = None) -> List[RagResponse]:
         query = {}
-        if self.agent_id:
-            agent_filter = self._get_agent_filter()
+        if agent_id:
+            agent_filter = self._get_agent_filter(agent_id)
             agent_filter["$or"].append({"agent_id": None})
             query = agent_filter
             
@@ -173,7 +172,7 @@ class MongoVectorDbRagService(IRagService):
             except:
                 pass
 
-    async def search(self, query: str, limit: int = 5) -> List[RagResponse]:
+    async def search(self, query: str, limit: int = 5, agent_id: Optional[str] = None) -> List[RagResponse]:
         model = self.get_model()
         # Run embedding in a thread pool since it's CPU bound
         loop = asyncio.get_event_loop()
@@ -197,8 +196,8 @@ class MongoVectorDbRagService(IRagService):
         docs = []
         try:
             # If we have an agent_id, we need to filter results by it or org-wide
-            if self.agent_id:
-                agent_filter = self._get_agent_filter()
+            if agent_id:
+                agent_filter = self._get_agent_filter(agent_id)
                 agent_filter["$or"].append({"agent_id": None})
                 pipeline.append({
                     "$match": agent_filter
@@ -214,7 +213,7 @@ class MongoVectorDbRagService(IRagService):
         except Exception as e:
             print(f"Error during vector search: {e}")
             docs = []
-
+ 
         # Fallback to keyword regex-based text search if vector index is not set up or returned no results
         if not docs:
             # Split query by spaces and clean up words
@@ -234,8 +233,8 @@ class MongoVectorDbRagService(IRagService):
                     {"question": {"$regex": pattern, "$options": "i"}}
                 ]
             }
-            if self.agent_id:
-                agent_filter = self._get_agent_filter()
+            if agent_id:
+                agent_filter = self._get_agent_filter(agent_id)
                 agent_filter["$or"].append({"agent_id": None})
                 query_filter = {
                     "$and": [
