@@ -19,32 +19,14 @@ async def ingest_file_task(input: IngestInput, ctx: Context):
 
     # Retrieve services from ServiceRegistry singleton
     services = get_services(org_id)
-
-    # Get file metadata to construct the path/reference for the agent
-    file_res = await services.file_service.get_file(file_id)
-    if not file_res:
-        return {"status": "error", "message": f"File {file_id} not found in metadata service"}
-    
-    file_path = f"{file_id}.{file_res.extension}"
-    
-    # Run the Rag Manager Agent
-    agent = services.agent_service.get_runnable_agent("rag-manager")
-    
-    deps = {
-        "org_id": org_id,
-        "agent_id": "rag-manager",
-        "agent_service": services.agent_service,
-        "file_service": services.file_service,
-        "parse_service": services.parse_service,
-        "graph_rag_service": services.graph_rag_service
-    }
-    
-    prompt = f"Please ingest the file '{file_path}' into the Graph RAG system."
     
     try:
-        # We run the agent directly. In the future, we might want to record this as a 'System Chat'.
-        await agent.run(prompt, deps=deps)
-        return {"status": "success", "file_id": file_id, "message": "Ingestion completed"}
+        # Direct ingestion using MongoDB IngestService
+        success = await services.ingest_service.ingest_file_parse(file_id, org_id)
+        if success:
+            return {"status": "success", "file_id": file_id, "message": "Ingestion completed"}
+        else:
+            return {"status": "failed", "error": "Ingestion service returned failure"}
     except Exception as e:
         print(f"Error ingesting file {file_id}: {str(e)}")
         return {"status": "failed", "error": str(e)}
