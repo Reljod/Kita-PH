@@ -11,7 +11,7 @@ from pydantic_ai.providers.openrouter import OpenRouterProvider
 
 from app.models.rag import RagResponse
 from app.db import TenantCollection
-from app.services.rag.nested_data_enrichment_service import NestedDataEnrichmentService, get_nested_value
+from app.services.rag.nested_data_enrichment_service import INestedDataEnrichmentService, get_nested_value
 from app.services.rag.mongodb_vector_search_rag_service import MongoDBVectorSearchRagService
 from app.services.rag.mongodb_text_search_rag_service import MongoDBTextSearchRagService
 from app.services.rag.reranking_rag_service import RerankingRagService
@@ -31,6 +31,7 @@ class RetrievalService(IRetrievalService):
         text_service: MongoDBTextSearchRagService,
         reranking_service: RerankingRagService,
         parse_collection: TenantCollection, # file_parse (contains the original unflattened result)
+        nested_data_enrichment_service: INestedDataEnrichmentService,
         agent_id: Optional[str] = None
     ):
         self.collection = collection
@@ -38,6 +39,7 @@ class RetrievalService(IRetrievalService):
         self.text_service = text_service
         self.reranking_service = reranking_service
         self.parse_collection = parse_collection
+        self.nested_data_enrichment_service = nested_data_enrichment_service
         self.agent_id = agent_id
         self._llm_model = None
 
@@ -75,7 +77,7 @@ class RetrievalService(IRetrievalService):
         # Build document trees in memory for path lookup
         trees_map = {}
         for fid, doc in parse_doc_map.items():
-            tree, _ = NestedDataEnrichmentService.build_hierarchy_and_leaves(
+            tree, _ = self.nested_data_enrichment_service.build_hierarchy_and_leaves(
                 parse_result=doc.get("result", {}),
                 file_id=fid,
                 org_id=self.collection.org_id

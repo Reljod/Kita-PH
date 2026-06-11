@@ -4,7 +4,7 @@ from typing import List, Optional, Dict, Any, Protocol
 from bson import ObjectId
 from app.models.rag import RagCreateRequest, RagUpdateRequest, RagResponse, RagDocument
 from app.db import TenantCollection
-from app.services.rag.nested_data_enrichment_service import NestedDataEnrichmentService
+from app.services.rag.nested_data_enrichment_service import INestedDataEnrichmentService
 from app.services.rag.mongodb_vector_search_rag_service import MongoDBVectorSearchRagService
 
 class IIngestService(Protocol):
@@ -29,11 +29,13 @@ class IngestService(IIngestService):
         self, 
         collection: TenantCollection, 
         vector_service: MongoDBVectorSearchRagService,
+        nested_data_enrichment_service: INestedDataEnrichmentService,
         parse_collection: Optional[TenantCollection] = None,
         agent_id: Optional[str] = None
     ):
         self.collection = collection # file_parsed_flattened
         self.vector_service = vector_service
+        self.nested_data_enrichment_service = nested_data_enrichment_service
         self.parse_collection = parse_collection # file_parse
         self.agent_id = agent_id
 
@@ -178,7 +180,7 @@ class IngestService(IIngestService):
         parent_doc_id = parse_doc["_id"] # Use file_parse record's _id as parent_doc_id
         
         # 1. Run the flattener and hierarchy parser
-        nested_tree, leaves = NestedDataEnrichmentService.build_hierarchy_and_leaves(
+        nested_tree, leaves = self.nested_data_enrichment_service.build_hierarchy_and_leaves(
             parse_result=result,
             file_id=file_id,
             org_id=org_id

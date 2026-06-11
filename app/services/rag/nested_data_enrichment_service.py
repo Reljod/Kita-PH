@@ -1,5 +1,5 @@
 import re
-from typing import Dict, Any, List, Tuple, Optional
+from typing import Dict, Any, List, Tuple, Optional, Protocol
 
 def slugify(text: str) -> str:
     """Converts a heading or key to a clean lowercased slug."""
@@ -29,9 +29,18 @@ def get_nested_value(d: dict, path: List[str]) -> Optional[Any]:
         current = current[step]
     return current
 
-class NestedDataEnrichmentService:
-    @staticmethod
+class INestedDataEnrichmentService(Protocol):
     def build_hierarchy_and_leaves(
+        self,
+        parse_result: Dict[str, Any], 
+        file_id: str, 
+        org_id: str
+    ) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+        ...
+
+class NestedDataEnrichmentService(INestedDataEnrichmentService):
+    def build_hierarchy_and_leaves(
+        self,
         parse_result: Dict[str, Any], 
         file_id: str, 
         org_id: str
@@ -62,7 +71,7 @@ class NestedDataEnrichmentService:
             
             # Fallback if layout items are missing but markdown is present
             if not items and page_obj.get("markdown"):
-                items = NestedDataEnrichmentService._parse_markdown_to_items(page_obj["markdown"])
+                items = self._parse_markdown_to_items(page_obj["markdown"])
                 
             for item in items:
                 item_type = item.get("type", "")
@@ -110,7 +119,7 @@ class NestedDataEnrichmentService:
                         if not sub_text:
                             continue
                         sub_bbox = sub_item.get("bbox") or item.get("bbox") # fallback to parent list bbox
-                        NestedDataEnrichmentService._process_leaf(
+                        self._process_leaf(
                             text_content=sub_text,
                             bbox=sub_bbox,
                             page_num=page_num,
@@ -128,7 +137,7 @@ class NestedDataEnrichmentService:
                         item_val = item_md
                     if not item_val:
                         continue
-                    NestedDataEnrichmentService._process_leaf(
+                    self._process_leaf(
                         text_content=item_val,
                         bbox=item.get("bbox"),
                         page_num=page_num,
@@ -143,8 +152,8 @@ class NestedDataEnrichmentService:
                     
         return nested_json, leaves
 
-    @staticmethod
     def _process_leaf(
+        self,
         text_content: str,
         bbox: Optional[Any],
         page_num: int,
@@ -223,8 +232,7 @@ class NestedDataEnrichmentService:
             "item_type": item_type
         })
 
-    @staticmethod
-    def _parse_markdown_to_items(md_content: str) -> List[Dict[str, Any]]:
+    def _parse_markdown_to_items(self, md_content: str) -> List[Dict[str, Any]]:
         """Fallback markdown lines parser when items list is missing."""
         items = []
         lines = md_content.split("\n")

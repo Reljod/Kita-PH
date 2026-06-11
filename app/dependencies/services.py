@@ -17,6 +17,12 @@ from app.services.parse_service import LlamaParseService
 from app.services.graph_rag_service import Neo4JGraphRagService
 from app.services.rag_service import IRagService, MongoVectorDbRagService
 from app.services.chat_service import IChatService, ChatService
+from app.services.rag.nested_data_enrichment_service import INestedDataEnrichmentService, NestedDataEnrichmentService
+from app.services.rag.mongodb_vector_search_rag_service import MongoDBVectorSearchRagService
+from app.services.rag.mongodb_text_search_rag_service import MongoDBTextSearchRagService
+from app.services.rag.reranking_rag_service import RerankingRagService
+from app.services.rag.ingest_service import IIngestService, IngestService
+from app.services.rag.retrieval_service import IRetrievalService, RetrievalService
 
 # Database
 from app.db import db, TenantCollection
@@ -70,6 +76,7 @@ class ServiceRegistry:
 
         # Tenant-scoped services
         self.llm_service = LlmService(TenantCollection(db.get_llms_collection(), org_id))
+        self.nested_data_enrichment_service = NestedDataEnrichmentService()
         
         self.agent_service = AgentService(
             llm_service=self.llm_service,
@@ -102,6 +109,28 @@ class ServiceRegistry:
         
         self.rag_service = MongoVectorDbRagService(
             collection=TenantCollection(db.get_rag_collection(), org_id)
+        )
+        
+        self.mongodb_vector_search_rag_service = MongoDBVectorSearchRagService(
+            collection=TenantCollection(db.get_file_parsed_flattened_collection(), org_id)
+        )
+        self.mongodb_text_search_rag_service = MongoDBTextSearchRagService(
+            collection=TenantCollection(db.get_file_parsed_flattened_collection(), org_id)
+        )
+        self.reranking_rag_service = RerankingRagService()
+        self.ingest_service = IngestService(
+            collection=TenantCollection(db.get_file_parsed_flattened_collection(), org_id),
+            vector_service=self.mongodb_vector_search_rag_service,
+            nested_data_enrichment_service=self.nested_data_enrichment_service,
+            parse_collection=TenantCollection(db.get_file_parse_collection(), org_id)
+        )
+        self.retrieval_service = RetrievalService(
+            collection=TenantCollection(db.get_file_parsed_flattened_collection(), org_id),
+            vector_service=self.mongodb_vector_search_rag_service,
+            text_service=self.mongodb_text_search_rag_service,
+            reranking_service=self.reranking_rag_service,
+            parse_collection=TenantCollection(db.get_file_parse_collection(), org_id),
+            nested_data_enrichment_service=self.nested_data_enrichment_service
         )
         
         self.chat_service = ChatService(
@@ -187,5 +216,41 @@ def get_chat_service(
     x_agent_id: Optional[str] = Header(None, alias="x-agent-id")
 ) -> IChatService:
     return get_services(org_id).chat_service
+
+
+def get_nested_data_enrichment_service(
+    org_id: str = Depends(get_current_org_id)
+) -> INestedDataEnrichmentService:
+    return get_services(org_id).nested_data_enrichment_service
+
+
+def get_mongodb_vector_search_rag_service(
+    org_id: str = Depends(get_current_org_id)
+) -> MongoDBVectorSearchRagService:
+    return get_services(org_id).mongodb_vector_search_rag_service
+
+
+def get_mongodb_text_search_rag_service(
+    org_id: str = Depends(get_current_org_id)
+) -> MongoDBTextSearchRagService:
+    return get_services(org_id).mongodb_text_search_rag_service
+
+
+def get_reranking_rag_service(
+    org_id: str = Depends(get_current_org_id)
+) -> RerankingRagService:
+    return get_services(org_id).reranking_rag_service
+
+
+def get_ingest_service(
+    org_id: str = Depends(get_current_org_id)
+) -> IIngestService:
+    return get_services(org_id).ingest_service
+
+
+def get_retrieval_service(
+    org_id: str = Depends(get_current_org_id)
+) -> IRetrievalService:
+    return get_services(org_id).retrieval_service
 
 
