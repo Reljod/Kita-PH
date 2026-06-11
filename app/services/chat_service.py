@@ -71,10 +71,7 @@ class ChatService(IChatService):
         if not rag_service:
             # Fallback construct
             rag_coll = TenantCollection(db.get_rag_collection(), self.collection.org_id)
-            rag_service = MongoVectorDbRagService(rag_coll, agent_id=agent_id)
-        else:
-            # Create a copy/instance bound to agent_id
-            rag_service = MongoVectorDbRagService(rag_service.collection, agent_id=agent_id)
+            rag_service = MongoVectorDbRagService(rag_coll)
 
         return {
             "org_id": self.collection.org_id, 

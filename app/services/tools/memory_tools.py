@@ -21,16 +21,11 @@ async def search_memory(
     if not service:
         # Fallback to manual instantiation
         org_id = ctx.deps["org_id"]
-        agent_id = ctx.deps.get("agent_id")
         collection = TenantCollection(db.get_rag_collection(), org_id)
-        service = MongoVectorDbRagService(collection, agent_id=agent_id)
-    else:
-        # Bind the current agent_id if the service was constructed without one or with a different one
-        agent_id = ctx.deps.get("agent_id")
-        if agent_id:
-            service = MongoVectorDbRagService(service.collection, agent_id=agent_id)
+        service = MongoVectorDbRagService(collection)
 
-    results = await service.search(query, limit=limit)
+    agent_id = ctx.deps.get("agent_id")
+    results = await service.search(query, limit=limit, agent_id=agent_id)
     
     if not results:
         return "No relevant information found in memory."
