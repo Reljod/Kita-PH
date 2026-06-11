@@ -11,6 +11,12 @@ def slugify(text: str) -> str:
     slug = re.sub(r'[\s-]+', '_', cleaned)
     return slug.strip('_')
 
+def is_heading(text: str) -> bool:
+    """Checks if the text is a markdown heading (starts with '#' followed by space)."""
+    if not isinstance(text, str):
+        return False
+    return bool(re.match(r'^#+\s', text.strip()))
+
 def set_nested_value(d: dict, path: List[str], key: str, value: Any):
     """Sets a value in a nested dictionary along a path."""
     current = d
@@ -77,18 +83,18 @@ class NestedDataEnrichmentService(INestedDataEnrichmentService):
                 item_type = item.get("type", "")
                 
                 # Check for heading
-                is_heading = item_type == "heading"
+                is_heading_item = item_type == "heading"
                 item_md = item.get("md", "")
                 item_val = item.get("value") or item.get("text") or ""
                 
-                if not is_heading and item_md.strip().startswith("#"):
-                    is_heading = True
+                if not is_heading_item and is_heading(item_md):
+                    is_heading_item = True
                     
-                if is_heading:
+                if is_heading_item:
                     # Get heading text
                     h_text = item_val.strip()
                     if not h_text and item_md:
-                        h_text = item_md.lstrip("#").strip()
+                        h_text = item_md.strip().lstrip("#").strip()
                     
                     if not h_text:
                         continue
@@ -97,7 +103,8 @@ class NestedDataEnrichmentService(INestedDataEnrichmentService):
                     level = item.get("level")
                     if level is None:
                         # count leading '#'
-                        level = len(item_md) - len(item_md.lstrip("#"))
+                        item_md_stripped = item_md.strip()
+                        level = len(item_md_stripped) - len(item_md_stripped.lstrip("#"))
                         if level == 0:
                             level = 1
                             
@@ -114,6 +121,23 @@ class NestedDataEnrichmentService(INestedDataEnrichmentService):
                 # If list item, process each sub-item as a leaf
                 if item_type == "list" and "items" in item:
                     list_items = item.get("items", [])
+                    list_title = (item.get("text") or item.get("value") or "").strip()
+                    if not list_title and "md" in item:
+                        md_val = item["md"].strip()
+                        if "\n" not in md_val:
+                            list_title = md_val
+                            
+                    pushed_heading = False
+                    if list_title:
+                        # Clean up formatting like list numbers or bullets or markdown header chars
+                        list_title_clean = list_title.lstrip("#*1234567890. ").strip()
+                        if list_title_clean:
+                            slug = slugify(list_title_clean)
+                            if not slug:
+                                slug = "list_group"
+                            heading_stack.append((slug, list_title_clean))
+                            pushed_heading = True
+
                     for sub_item in list_items:
                         sub_text = sub_item.get("value") or sub_item.get("text") or sub_item.get("md") or ""
                         if not sub_text:
@@ -131,6 +155,8 @@ class NestedDataEnrichmentService(INestedDataEnrichmentService):
                             org_id=org_id,
                             item_type="text"
                         )
+                    if pushed_heading:
+                        heading_stack.pop()
                 else:
                     # Single text or table leaf
                     if not item_val and item_md:
@@ -240,11 +266,14 @@ class NestedDataEnrichmentService(INestedDataEnrichmentService):
             line_str = line.strip()
             if not line_str:
                 continue
-            if line_str.startswith("#"):
+            if is_heading(line_str):
+                # Count leading '#' to determine level
+                level = len(line_str) - len(line_str.lstrip("#"))
                 items.append({
                     "type": "heading",
                     "value": line_str.lstrip("#").strip(),
-                    "md": line_str
+                    "md": line_str,
+                    "level": level
                 })
             else:
                 items.append({
