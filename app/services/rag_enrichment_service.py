@@ -5,8 +5,21 @@ from pydantic import BaseModel, Field
 from pydantic_ai import Agent
 from pydantic_ai.models.openrouter import OpenRouterModel
 from pydantic_ai.providers.openrouter import OpenRouterProvider
+from openai import AsyncOpenAI
 from app.db import TenantCollection
 from bson import ObjectId
+
+EMBEDDING_MODEL = "perplexity/pplx-embed-v1-0.6b"
+
+
+async def _create_embedding(text: str) -> list:
+    client = AsyncOpenAI(
+        api_key=os.getenv("OPENROUTER_API_KEY", ""),
+        base_url="https://openrouter.ai/api/v1",
+    )
+    response = await client.embeddings.create(model=EMBEDDING_MODEL, input=text)
+    return response.data[0].embedding
+
 
 class EnrichmentResult(BaseModel):
     question: str = Field(description="A highly specific question derived from the title and content. It must incorporate the key entities and context of the memory, and serve as a retrieval query.")
@@ -28,7 +41,7 @@ class RagEnrichmentService:
             )
         return self._model
 
-    async def enrich_and_embed(self, doc_id: str, sentence_transformer_model) -> dict:
+    async def enrich_and_embed(self, doc_id: str) -> dict:
         try:
             obj_id = ObjectId(doc_id)
         except Exception:
@@ -70,15 +83,14 @@ class RagEnrichmentService:
         # Add date to the text we embed
         embedding_text = f"Date: {date_str}. Question: {question}"
 
-        # Generate embedding vector
-        loop = asyncio.get_event_loop()
-        embedding = await loop.run_in_executor(None, sentence_transformer_model.encode, embedding_text)
+        # Generate embedding vector via OpenRouter
+        embedding = await _create_embedding(embedding_text)
 
         update_data = {
             "question": question,
             "content": answer,  # The content field answers the question
             "answer": answer,
-            "embedding": embedding.tolist(),
+            "embedding": embedding,
             "status": "completed",
             "updated_at": datetime.now(timezone.utc)
         }

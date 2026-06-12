@@ -1,9 +1,49 @@
 import asyncio
+import os
+import httpx
 from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any, Protocol
 from bson import ObjectId
 from app.models.rag import RagCreateRequest, RagUpdateRequest, RagResponse, RagDocument
 from app.db import TenantCollection
+
+EMBEDDING_MODEL = "perplexity/pplx-embed-v1-0.6b"
+RERANK_MODEL = "cohere/rerank-v3.5"
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+
+
+def _get_openrouter_client():
+    from openai import AsyncOpenAI
+    return AsyncOpenAI(
+        api_key=os.getenv("OPENROUTER_API_KEY", ""),
+        base_url=OPENROUTER_BASE_URL,
+    )
+
+
+async def _create_embedding(text: str) -> list:
+    client = _get_openrouter_client()
+    response = await client.embeddings.create(model=EMBEDDING_MODEL, input=text)
+    return response.data[0].embedding
+
+
+async def _rerank(query: str, documents: list[str], top_n: int) -> list:
+    """
+    Calls OpenRouter /api/v1/rerank and returns results sorted by relevance_score desc.
+    Falls back to an empty list on error.
+    """
+    api_key = os.getenv("OPENROUTER_API_KEY", "")
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.post(
+                f"{OPENROUTER_BASE_URL}/rerank",
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                json={"model": RERANK_MODEL, "query": query, "documents": documents, "top_n": top_n},
+            )
+            response.raise_for_status()
+            return response.json().get("results", [])
+    except Exception as e:
+        print(f"Reranking API error: {e}")
+        return []
 
 class IRagService(Protocol):
     async def add_rag(self, req: RagCreateRequest) -> RagResponse:
@@ -36,8 +76,6 @@ def format_rag_response(doc: Dict[str, Any]) -> RagResponse:
     )
 
 class MongoVectorDbRagService(IRagService):
-    _model = None
-    _reranker = None
 
     def __init__(self, collection: TenantCollection):
         self.collection = collection
@@ -57,21 +95,6 @@ class MongoVectorDbRagService(IRagService):
                 {"agent_id": {"$regex": f"^{base_id}(-v\\d+)?$"}}
             ]
         }
-
-    @classmethod
-    def get_model(cls):
-        if cls._model is None:
-            # We initialize the model lazily
-            from sentence_transformers import SentenceTransformer
-            cls._model = SentenceTransformer('all-MiniLM-L6-v2')
-        return cls._model
-
-    @classmethod
-    def get_reranker(cls):
-        if cls._reranker is None:
-            from sentence_transformers import CrossEncoder
-            cls._reranker = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
-        return cls._reranker
 
     async def add_rag(self, req: RagCreateRequest) -> RagResponse:
         from app.models.agent import parse_agent_id
@@ -161,7 +184,7 @@ class MongoVectorDbRagService(IRagService):
         try:
             from app.services.rag_enrichment_service import RagEnrichmentService
             enricher = RagEnrichmentService(self.collection)
-            await enricher.enrich_and_embed(rag_id, self.get_model())
+            await enricher.enrich_and_embed(rag_id)
         except Exception as e:
             print(f"Error updating embedding for {rag_id}: {e}")
             try:
@@ -173,11 +196,9 @@ class MongoVectorDbRagService(IRagService):
                 pass
 
     async def search(self, query: str, limit: int = 5, agent_id: Optional[str] = None) -> List[RagResponse]:
-        model = self.get_model()
-        # Run embedding in a thread pool since it's CPU bound
-        loop = asyncio.get_event_loop()
-        query_embedding = await loop.run_in_executor(None, model.encode, query)
-        
+        # Embed the query via OpenRouter
+        query_embedding = await _create_embedding(query)
+
         # Atlas Vector Search
         # Retrieve limit * 4 candidates for rerank
         candidate_limit = limit * 4
@@ -186,81 +207,64 @@ class MongoVectorDbRagService(IRagService):
                 "$vectorSearch": {
                     "index": "rag_index",
                     "path": "embedding",
-                    "queryVector": query_embedding.tolist(),
+                    "queryVector": query_embedding,
                     "numCandidates": candidate_limit * 10,
                     "limit": candidate_limit
                 }
             }
         ]
-        
+
         docs = []
         try:
             # If we have an agent_id, we need to filter results by it or org-wide
             if agent_id:
                 agent_filter = self._get_agent_filter(agent_id)
                 agent_filter["$or"].append({"agent_id": None})
-                pipeline.append({
-                    "$match": agent_filter
-                })
-            
-            pipeline.append({
-                "$set": {
-                    "search_score": {"$meta": "vectorSearchScore"}
-                }
-            })
-            
+                pipeline.append({"$match": agent_filter})
+
+            pipeline.append({"$set": {"search_score": {"$meta": "vectorSearchScore"}}})
             docs = list(self.collection.aggregate(pipeline))
         except Exception as e:
             print(f"Error during vector search: {e}")
             docs = []
- 
-        # Fallback to keyword regex-based text search if vector index is not set up or returned no results
+
+        # Fallback to keyword regex-based text search if vector index returned no results
         if not docs:
-            # Split query by spaces and clean up words
             import re
             words = [w.strip("?,.!:;()\"'") for w in query.split() if len(w) > 2]
             stopwords = {"what", "how", "why", "who", "where", "when", "which", "this", "that", "with", "from", "about", "info"}
-            search_words = [w for w in words if w.lower() not in stopwords]
-            
-            if not search_words:
-                search_words = [query]
-                
+            search_words = [w for w in words if w.lower() not in stopwords] or [query]
             pattern = "|".join(re.escape(w) for w in search_words)
-            query_filter = {
+            query_filter: dict = {
                 "$or": [
                     {"title": {"$regex": pattern, "$options": "i"}},
                     {"content": {"$regex": pattern, "$options": "i"}},
-                    {"question": {"$regex": pattern, "$options": "i"}}
+                    {"question": {"$regex": pattern, "$options": "i"}},
                 ]
             }
             if agent_id:
                 agent_filter = self._get_agent_filter(agent_id)
                 agent_filter["$or"].append({"agent_id": None})
-                query_filter = {
-                    "$and": [
-                        query_filter,
-                        agent_filter
-                    ]
-                }
+                query_filter = {"$and": [query_filter, agent_filter]}
             docs = list(self.collection.find(query_filter).sort("updated_at", -1).limit(candidate_limit))
 
         if not docs:
             return []
 
-        # Rerank candidates using CrossEncoder if available
-        rerank_scores = None
+        # Rerank candidates via OpenRouter cohere/rerank-v3.5
+        rerank_results = []
+        doc_texts = [doc.get("question") or f"{doc.get('title', '')}: {doc.get('content', '')}" for doc in docs]
         try:
-            reranker = self.get_reranker()
-            pairs = [(query, doc.get("question") or f"{doc['title']}: {doc['content']}") for doc in docs]
-            rerank_scores = await loop.run_in_executor(None, reranker.predict, pairs)
-            
-            # If we only have one result, rerank_scores might be a float scalar rather than a list/array
-            if isinstance(rerank_scores, (int, float)):
-                rerank_scores = [rerank_scores]
+            rerank_results = await _rerank(query, doc_texts, top_n=len(docs))
         except Exception as re_err:
-            print(f"Failed to use cross-encoder for reranking: {re_err}")
+            print(f"Failed to rerank: {re_err}")
 
-        # Compute combined score: baseline score (cross-encoder or search_score) + recency boost
+        # Build an index→score map from rerank results
+        rerank_score_map: dict[int, float] = {}
+        for item in rerank_results:
+            rerank_score_map[item["index"]] = item.get("relevance_score", 0.5)
+
+        # Compute combined score: rerank relevance (or vector search score) + recency boost
         now = datetime.now(timezone.utc)
         for idx, doc in enumerate(docs):
             # Recency score calculation
@@ -270,24 +274,16 @@ class MongoVectorDbRagService(IRagService):
                     created_at = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
                 except:
                     created_at = now
-            
+
             age_in_days = (now.replace(tzinfo=None) - created_at.replace(tzinfo=None)).total_seconds() / 86400.0
             age_in_days = max(0.0, age_in_days)
             # Recency decays from 1.0 (newest) to near 0.0 (old) with a half-life of ~30 days
             recency_score = 1.0 / (1.0 + age_in_days / 30.0)
 
-            # Determine baseline score (from reranker or search score or default)
-            if rerank_scores is not None and idx < len(rerank_scores):
-                import math
-                try:
-                    # Convert logit output to a normalized 0-1 range using sigmoid
-                    score = 1.0 / (1.0 + math.exp(-float(rerank_scores[idx])))
-                except:
-                    score = 0.5
-            else:
-                score = doc.get("search_score", 0.5)
+            # Baseline: use cohere rerank score if available, else fall back to vector search score
+            score = rerank_score_map.get(idx, doc.get("search_score", 0.5))
 
-            # Combine baseline score (weight 0.8) and recency score (weight 0.2)
+            # Combine baseline score + recency boost
             doc["combined_score"] = score + 0.2 * recency_score
 
         # Sort and take top limit
