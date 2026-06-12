@@ -84,6 +84,14 @@ class ServiceRegistry:
             tools_collection=TenantCollection(db.get_tools_collection(), org_id)
         )
         
+        from app.services.redis_service import RedisService
+        from app.services.agent_status_service import AgentStatusService
+        self.agent_status_service = AgentStatusService(
+            org_id=org_id,
+            redis_client=RedisService.get_client(),
+            agent_service=self.agent_service
+        )
+        
         self.tool_service = ToolService(
             web_search_service=self.web_search_service,
             collection=TenantCollection(db.get_tools_collection(), org_id)
@@ -260,5 +268,12 @@ def get_adaptive_rag_service(
     org_id: str = Depends(get_current_org_id)
 ) -> Any:
     return get_services(org_id).adaptive_rag_service
+
+
+def get_agent_status_service(
+    org_id: str = Depends(get_current_org_id)
+) -> Any:
+    return get_services(org_id).agent_status_service
+
 
 

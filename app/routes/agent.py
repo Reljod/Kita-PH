@@ -1,6 +1,6 @@
-from fastapi import APIRouter, HTTPException, Depends, Query, BackgroundTasks, status
+from fastapi import APIRouter, HTTPException, Depends, Query, BackgroundTasks, status, Header
 import os
-from typing import List
+from typing import List, Optional
 from app.models.agent import (
     AgentCreateRequest, AgentUpdateRequest, AgentResponse,
     AddToolsRequest, RemoveToolsRequest
@@ -58,16 +58,27 @@ def delete_agent(agent_id: str, service: IAgentService = Depends(get_agent_servi
 # (ChatService dependency is imported from app.dependencies)
 
 @router.post("/{agent_id}/chat", response_model=ChatResponse)
-async def create_agent_chat(agent_id: str, req: ChatCreateRequest, chat_service: IChatService = Depends(get_chat_service)):
+async def create_agent_chat(
+    agent_id: str, 
+    req: ChatCreateRequest, 
+    chat_service: IChatService = Depends(get_chat_service),
+    x_status_key: Optional[str] = Header(None, alias="x-status-key")
+):
     try:
-        return await chat_service.create_chat(req, agent_id=agent_id)
+        return await chat_service.create_chat(req, agent_id=agent_id, status_key=x_status_key)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error generating AI response: {str(e)}")
 
 @router.post("/{agent_id}/chat/{chat_id}/continue", response_model=ChatResponse)
-async def continue_agent_chat(agent_id: str, chat_id: str, req: ChatContinueRequest, chat_service: IChatService = Depends(get_chat_service)):
+async def continue_agent_chat(
+    agent_id: str, 
+    chat_id: str, 
+    req: ChatContinueRequest, 
+    chat_service: IChatService = Depends(get_chat_service),
+    x_status_key: Optional[str] = Header(None, alias="x-status-key")
+):
     try:
-        chat = await chat_service.continue_chat(chat_id, req, agent_id=agent_id)
+        chat = await chat_service.continue_chat(chat_id, req, agent_id=agent_id, status_key=x_status_key)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:

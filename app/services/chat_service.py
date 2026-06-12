@@ -8,9 +8,9 @@ from app.services.agent_service import IAgentService
 from app.db import TenantCollection
 
 class IChatService(Protocol):
-    async def create_chat(self, req: ChatCreateRequest, agent_id: Optional[str] = None) -> ChatResponse:
+    async def create_chat(self, req: ChatCreateRequest, agent_id: Optional[str] = None, status_key: Optional[str] = None) -> ChatResponse:
         ...
-    async def continue_chat(self, chat_id: str, req: ChatContinueRequest, agent_id: Optional[str] = None) -> Optional[ChatResponse]:
+    async def continue_chat(self, chat_id: str, req: ChatContinueRequest, agent_id: Optional[str] = None, status_key: Optional[str] = None) -> Optional[ChatResponse]:
         ...
     def get_chat(self, chat_id: str, agent_id: Optional[str] = None) -> Optional[ChatResponse]:
         ...
@@ -54,19 +54,18 @@ class ChatService(IChatService):
         self.agent_service = agent_service
         self.collection = collection
 
-    async def create_chat(self, req: ChatCreateRequest, agent_id: Optional[str] = None) -> ChatResponse:
+    async def create_chat(self, req: ChatCreateRequest, agent_id: Optional[str] = None, status_key: Optional[str] = None) -> ChatResponse:
         if not agent_id:
             raise ValueError("agent_id is required")
 
-        from app.dependencies.services import get_services
-        services = get_services(self.collection.org_id)
+        chat_id = str(ObjectId())
         
-        agent = self.agent_service.get_runnable_agent(agent_id=agent_id)
-        result = await services.adaptive_rag_service.run_agentic_flow(
+        result = await self.agent_service.run(
+            agent_id=agent_id,
             query=req.message,
-            agent=agent,
             message_history=None,
-            agent_id=agent_id
+            chat_id=chat_id,
+            status_key=status_key
         )
         
         messages_dump = to_jsonable_python(result.all_messages())
@@ -84,12 +83,12 @@ class ChatService(IChatService):
         )
         
         doc = new_chat.model_dump()
-        res = self.collection.insert_one(doc)
-        doc["_id"] = res.inserted_id
+        doc["_id"] = ObjectId(chat_id)
+        self.collection.insert_one(doc)
         
         return format_chat_response(doc)
 
-    async def continue_chat(self, chat_id: str, req: ChatContinueRequest, agent_id: Optional[str] = None) -> Optional[ChatResponse]:
+    async def continue_chat(self, chat_id: str, req: ChatContinueRequest, agent_id: Optional[str] = None, status_key: Optional[str] = None) -> Optional[ChatResponse]:
         try:
             obj_id = ObjectId(chat_id)
         except Exception:
@@ -110,15 +109,12 @@ class ChatService(IChatService):
         # Load history
         message_history = ModelMessagesTypeAdapter.validate_python(chat["messages"])
 
-        from app.dependencies.services import get_services
-        services = get_services(self.collection.org_id)
-        
-        agent = self.agent_service.get_runnable_agent(agent_id=agent_to_run_with)
-        result = await services.adaptive_rag_service.run_agentic_flow(
+        result = await self.agent_service.run(
+            agent_id=agent_to_run_with,
             query=req.message,
-            agent=agent,
             message_history=message_history,
-            agent_id=agent_to_run_with
+            chat_id=chat_id,
+            status_key=status_key
         )
         
         # Dump new history

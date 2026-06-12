@@ -1,6 +1,6 @@
 import os
 from bson import ObjectId
-from typing import List, Optional, Protocol
+from typing import List, Optional, Protocol, Any
 from datetime import datetime, timezone
 from pydantic_ai import Agent
 from pydantic_ai.models.openrouter import OpenRouterModel
@@ -28,6 +28,15 @@ class IAgentService(Protocol):
     async def add_tools(self, agent_id: str, tool_ids: List[str]) -> bool: ...
     async def remove_tools(self, agent_id: str, tool_ids: List[str]) -> bool: ...
     def get_agents_by_tool(self, tool_id: str) -> List[AgentResponse]: ...
+    async def run(
+        self,
+        agent_id: str,
+        query: str,
+        message_history: Optional[List[Any]] = None,
+        chat_id: Optional[str] = None,
+        status_key: Optional[str] = None
+    ) -> Any: ...
+
 
 
 class AgentService(IAgentService):
@@ -272,3 +281,47 @@ class AgentService(IAgentService):
             tools=dynamic_tools,
             toolsets=[delegation_toolset]
         )
+
+    async def run(
+        self,
+        agent_id: str,
+        query: str,
+        message_history: Optional[List[Any]] = None,
+        chat_id: Optional[str] = None,
+        status_key: Optional[str] = None
+    ) -> Any:
+        from app.dependencies.services import get_services
+        services = get_services(self.collection.org_id)
+
+        if status_key:
+            await services.agent_status_service.start_session(
+                status_key=status_key,
+                agent_id=agent_id,
+                chat_id=chat_id
+            )
+
+        try:
+            agent = self.get_runnable_agent(agent_id=agent_id)
+            result = await services.adaptive_rag_service.run_agentic_flow(
+                query=query,
+                agent=agent,
+                message_history=message_history,
+                agent_id=agent_id,
+                status_key=status_key
+            )
+            if status_key:
+                await services.agent_status_service.finish_session(
+                    status_key=status_key,
+                    success=True,
+                    chat_id=chat_id
+                )
+            return result
+        except Exception as e:
+            if status_key:
+                await services.agent_status_service.finish_session(
+                    status_key=status_key,
+                    success=False,
+                    chat_id=chat_id
+                )
+            raise e
+
