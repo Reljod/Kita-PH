@@ -217,12 +217,11 @@ class AdaptiveRagService:
         for attempt in range(1, max_attempts + 1):
             logfire.info("Adaptive RAG Self-Evaluation: Attempt {attempt} of {max_attempts}", attempt=attempt, max_attempts=max_attempts)
             
-            # Prepare generator prompt
-            user_prompt = query
+            # Prepare generator prompt instructions
+            run_instructions = None
             if relevant_facts:
                 facts_block = "\n\n".join([f"Fact {i}:\n{fact}" for i, fact in enumerate(relevant_facts, 1)])
-                user_prompt = (
-                    f"{query}\n\n"
+                run_instructions = (
                     f"[RELEVANT RETRIEVED CONTEXT]\n"
                     f"{facts_block}\n\n"
                     f"INSTRUCTION: Draft your response using ONLY the relevant retrieved facts above when applicable. "
@@ -231,7 +230,12 @@ class AdaptiveRagService:
             
             # Execute agent (Generator)
             logfire.info("Adaptive RAG: Invoking generator agent.")
-            result = await agent.run(user_prompt, message_history=message_history, deps=deps)
+            result = await agent.run(
+                query,
+                message_history=message_history,
+                deps=deps,
+                instructions=run_instructions
+            )
             draft_response = result.data if hasattr(result, "data") else getattr(result, "content", str(result))
             
             # If no retrieval happened, we are done
