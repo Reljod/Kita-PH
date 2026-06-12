@@ -396,3 +396,125 @@ class AdaptiveRagService:
         # If we exhausted max attempts, return the last draft
         logfire.warning("Adaptive RAG: Exhausted max attempts. Returning last generated result.")
         return result
+
+    async def run_agentic_flow_stream(
+        self,
+        query: str,
+        agent,
+        message_history,
+        agent_id: Optional[str] = None,
+        status_key: Optional[str] = None
+    ) -> Any:
+        """Executes the complete Adaptive RAG + Self-RAG loop, yielding deltas."""
+        active_agent_id = agent_id or "KitaAgent"
+
+        # 0. Condense query if history exists
+        standalone_query = await self.condense_query(query, message_history, status_key=status_key, agent_id=active_agent_id)
+
+        # 1. Route query
+        strategy = await self.route_query(standalone_query, status_key=status_key, agent_id=active_agent_id)
+        logfire.info("Adaptive RAG stream: query={query!r} (condensed={standalone_query!r}) routed to strategy={strategy!r}", query=query, standalone_query=standalone_query, strategy=strategy)
+        
+        visited_strategies = {strategy}
+        current_query = standalone_query
+        relevant_facts = []
+        
+        if strategy != "none":
+            relevant_facts = await self.retrieve_facts(strategy, current_query, status_key=status_key, agent_id=active_agent_id)
+            
+            # If no relevant facts found, failover to alternative strategy
+            if not relevant_facts:
+                alt_strategy = "web" if strategy == "vector" else "vector"
+                if alt_strategy not in visited_strategies:
+                    logfire.info("Adaptive RAG stream: No relevant facts found. Failing over to {alt_strategy}", alt_strategy=alt_strategy)
+                    visited_strategies.add(alt_strategy)
+                    strategy = alt_strategy
+                    current_query = await self.rewrite_query(standalone_query, status_key=status_key, agent_id=active_agent_id)
+                    relevant_facts = await self.retrieve_facts(strategy, current_query, status_key=status_key, agent_id=active_agent_id)
+
+        # Loop for Generation & Evaluation (Self-RAG)
+        max_attempts = 3
+        stream_result = None
+        
+        deps = self._get_deps(agent_id, status_key=status_key)
+        
+        for attempt in range(1, max_attempts + 1):
+            logfire.info("Adaptive RAG stream Self-Evaluation: Attempt {attempt} of {max_attempts}", attempt=attempt, max_attempts=max_attempts)
+            
+            # Prepare generator prompt instructions
+            run_instructions = None
+            if relevant_facts:
+                facts_block = "\n\n".join([f"Fact {i}:\n{fact}" for i, fact in enumerate(relevant_facts, 1)])
+                run_instructions = (
+                    f"[RELEVANT RETRIEVED CONTEXT]\n"
+                    f"{facts_block}\n\n"
+                    f"INSTRUCTION: Draft your response using ONLY the relevant retrieved facts above when applicable. "
+                    f"Do not hallucinate or state details not supported by the facts."
+                )
+            
+            # Update status to generating response
+            if status_key:
+                try:
+                    from app.dependencies.services import get_services
+                    services = get_services(self.org_id)
+                    await services.agent_status_service.update_step(status_key, "generate_response", active_agent_id)
+                except Exception as e:
+                    logfire.error("Failed to update status step before generator stream run: {error}", error=str(e))
+
+            # Execute agent (Generator) with run_stream!
+            logfire.info("Adaptive RAG stream: Invoking generator agent in stream mode.")
+            draft_response_chunks = []
+            async with agent.run_stream(
+                query,
+                message_history=message_history,
+                deps=deps,
+                instructions=run_instructions
+            ) as stream_result:
+                async for text_chunk in stream_result.stream_text(delta=True):
+                    draft_response_chunks.append(text_chunk)
+                    yield {"type": "content", "delta": text_chunk}
+            
+            draft_response = "".join(draft_response_chunks).strip()
+            
+            # If no retrieval happened, we are done
+            if not relevant_facts:
+                logfire.info("Adaptive RAG stream: No retrieval strategy was used. Returning stream result.")
+                yield {"type": "result", "result": stream_result}
+                return
+                
+            # Grade groundedness
+            is_grounded = await self.grade_groundedness(relevant_facts, draft_response, status_key=status_key, agent_id=active_agent_id)
+            if not is_grounded:
+                logfire.warning("Adaptive RAG stream: Draft answer failed groundedness (hallucination check). Retrying.")
+                yield {"type": "reset"}
+                # Rewrite query and search again to find better facts
+                current_query = await self.rewrite_query(current_query, status_key=status_key, agent_id=active_agent_id)
+                relevant_facts = await self.retrieve_facts(strategy, current_query, status_key=status_key, agent_id=active_agent_id)
+                continue
+                
+            # Grade completeness
+            is_complete = await self.grade_completeness(standalone_query, draft_response, status_key=status_key, agent_id=active_agent_id)
+            if is_complete:
+                logfire.info("Adaptive RAG stream: Answer is complete and grounded! Returning stream result.")
+                yield {"type": "result", "result": stream_result}
+                return
+            else:
+                logfire.warning("Adaptive RAG stream: Draft answer failed completeness check.")
+                yield {"type": "reset"}
+                # Failover to the next strategy if not already visited
+                alt_strategy = "web" if strategy == "vector" else "vector"
+                if alt_strategy not in visited_strategies:
+                    logfire.info("Adaptive RAG stream: Failing over from {strategy} to {alt_strategy}", strategy=strategy, alt_strategy=alt_strategy)
+                    visited_strategies.add(alt_strategy)
+                    strategy = alt_strategy
+                    current_query = await self.rewrite_query(standalone_query, status_key=status_key, agent_id=active_agent_id)
+                    relevant_facts = await self.retrieve_facts(strategy, current_query, status_key=status_key, agent_id=active_agent_id)
+                else:
+                    # If we already tried all strategies, try rewriting the query and searching again
+                    logfire.info("Adaptive RAG stream: Both search strategies already tried. Rewriting query and retrying current strategy.")
+                    current_query = await self.rewrite_query(current_query, status_key=status_key, agent_id=active_agent_id)
+                    relevant_facts = await self.retrieve_facts(strategy, current_query, status_key=status_key, agent_id=active_agent_id)
+
+        # If we exhausted max attempts, return the last draft
+        logfire.warning("Adaptive RAG stream: Exhausted max attempts. Returning last stream result.")
+        yield {"type": "result", "result": stream_result}

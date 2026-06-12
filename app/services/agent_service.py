@@ -1,6 +1,6 @@
 import os
 from bson import ObjectId
-from typing import List, Optional, Protocol, Any
+from typing import List, Optional, Protocol, Any, AsyncIterator
 from datetime import datetime, timezone
 from pydantic_ai import Agent
 from pydantic_ai.models.openrouter import OpenRouterModel
@@ -36,6 +36,14 @@ class IAgentService(Protocol):
         chat_id: Optional[str] = None,
         status_key: Optional[str] = None
     ) -> Any: ...
+    async def run_stream(
+        self,
+        agent_id: str,
+        query: str,
+        message_history: Optional[List[Any]] = None,
+        chat_id: Optional[str] = None,
+        status_key: Optional[str] = None
+    ) -> AsyncIterator[dict]: ...
 
 
 
@@ -324,4 +332,49 @@ class AgentService(IAgentService):
                     chat_id=chat_id
                 )
             raise e
+
+    async def run_stream(
+        self,
+        agent_id: str,
+        query: str,
+        message_history: Optional[List[Any]] = None,
+        chat_id: Optional[str] = None,
+        status_key: Optional[str] = None
+    ) -> AsyncIterator[dict]:
+        from app.dependencies.services import get_services
+        services = get_services(self.collection.org_id)
+
+        if status_key:
+            await services.agent_status_service.start_session(
+                status_key=status_key,
+                agent_id=agent_id,
+                chat_id=chat_id
+            )
+
+        try:
+            agent = self.get_runnable_agent(agent_id=agent_id)
+            async for chunk in services.adaptive_rag_service.run_agentic_flow_stream(
+                query=query,
+                agent=agent,
+                message_history=message_history,
+                agent_id=agent_id,
+                status_key=status_key
+            ):
+                yield chunk
+
+            if status_key:
+                await services.agent_status_service.finish_session(
+                    status_key=status_key,
+                    success=True,
+                    chat_id=chat_id
+                )
+        except Exception as e:
+            if status_key:
+                await services.agent_status_service.finish_session(
+                    status_key=status_key,
+                    success=False,
+                    chat_id=chat_id
+                )
+            raise e
+
 
