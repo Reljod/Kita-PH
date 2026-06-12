@@ -21,16 +21,11 @@ async def search_memory(
     if not service:
         # Fallback to manual instantiation
         org_id = ctx.deps["org_id"]
-        agent_id = ctx.deps.get("agent_id")
         collection = TenantCollection(db.get_rag_collection(), org_id)
-        service = MongoVectorDbRagService(collection, agent_id=agent_id)
-    else:
-        # Bind the current agent_id if the service was constructed without one or with a different one
-        agent_id = ctx.deps.get("agent_id")
-        if agent_id:
-            service = MongoVectorDbRagService(service.collection, agent_id=agent_id)
+        service = MongoVectorDbRagService(collection)
 
-    results = await service.search(query, limit=limit)
+    agent_id = ctx.deps.get("agent_id")
+    results = await service.search(query, limit=limit, agent_id=agent_id)
     
     if not results:
         return "No relevant information found in memory."
@@ -45,56 +40,29 @@ async def search_memory(
     return "\n\n".join(formatted_results)
 
 @memory_toolset.tool
-async def search_memory_v2(
+async def rag_search(
     ctx: RunContext[dict],
-    query: Annotated[str, Field(description="The search query to find relevant information in the memory using hybrid search.")],
+    query: Annotated[str, Field(description="The search query to find relevant information in the memory using hybrid vector and keyword text search.")],
     limit: Annotated[int, Field(description="The maximum number of results to return.")] = 5
 ) -> str:
     """
-    Advanced memory search using Graph RAG. 
-    Retrieves relevant text chunks and associated entities/relationships.
-    Use this for complex queries that require connecting different pieces of information.
+    Performs a hybrid search combining vector search and full text search, followed by reranking.
+    Use this to retrieve factual context from uploaded documents to answer queries.
     """
-    from app.services.graph_rag_service import GraphRagService
+    from app.services.rag.retrieval_service import IRetrievalService
     
-    graph_service: GraphRagService = ctx.deps.get("graph_rag_service")
-    if not graph_service:
-        # Fallback to standard search if graph service is not available
+    retrieval_service: IRetrievalService = ctx.deps.get("retrieval_service")
+    if not retrieval_service:
+        # Fallback to standard vector RAG search if retrieval service is not available
         return await search_memory(ctx, query, limit)
     
-    agent_id = ctx.deps.get("agent_id")
-    # Apply agent scoping if available
-    filters = {"agent_id": agent_id} if agent_id else None
-    
-    results = await graph_service.query(query, limit=limit, filters=filters)
+    results = await retrieval_service.search(query, limit=limit)
     
     if not results:
         return "No relevant information found in memory."
     
     formatted_results = []
     for i, res in enumerate(results, 1):
-        chunk_text = f"RESULT {i} [Relevance: {res.score:.2f}]\n"
-        chunk_text += f"CONTENT: {res.content}\n"
+        formatted_results.append(f"Result {i} (Title: {res.title}):\n{res.content}")
         
-        # Source metadata
-        filename = res.metadata.get("filename")
-        if filename:
-            chunk_text += f"SOURCE: {filename}\n"
-            
-        # Graph Context: Entities and Relationships
-        if res.nodes:
-            entities = []
-            for n in res.nodes:
-                if n.label == "Entity":
-                    name = n.properties.get("name", "Unknown")
-                    etype = n.properties.get("type", "Entity")
-                    entities.append(f"{name} ({etype})")
-            
-            if entities:
-                # Deduplicate and sort
-                unique_entities = sorted(list(set(entities)))
-                chunk_text += f"MENTIONS: {', '.join(unique_entities)}\n"
-        
-        formatted_results.append(chunk_text.strip())
-    
     return "\n\n---\n\n".join(formatted_results)

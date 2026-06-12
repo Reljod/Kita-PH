@@ -2,57 +2,10 @@ from fastapi import APIRouter, HTTPException, Depends, Header
 import os
 from typing import List, Optional
 from app.models.chat import ChatCreateRequest, ChatResponse, ChatContinueRequest
-from app.services.chat_service import ChatService, IChatService
-from app.services.agent_service import IAgentService, AgentService
-from app.services.file_service import FileService
-from app.services.parse_service import LlamaParseService
-from app.services.graph_rag_service import Neo4JGraphRagService
-from app.services.event_service import HatchetEventService
-from app.services.llm_service import LlmService
-from app.db import db, TenantCollection
-from app.security import get_current_org_id
+from app.services.chat_service import IChatService
+from app.dependencies import get_chat_service
 
 router = APIRouter(prefix="/chat", tags=["Chat"])
-
-def get_agent_service(org_id: str = Depends(get_current_org_id)) -> IAgentService:
-    llm_service_coll = TenantCollection(db.get_llms_collection(), org_id)
-    llm_service = LlmService(llm_service_coll)
-    collection = TenantCollection(db.get_agents_collection(), org_id)
-    return AgentService(llm_service=llm_service, collection=collection)
-
-def get_chat_service(
-    org_id: str = Depends(get_current_org_id),
-    agent_service: IAgentService = Depends(get_agent_service)
-) -> IChatService:
-    collection = TenantCollection(db.get_chats_collection(), org_id)
-    
-    # Resolve RAG dependencies
-    event_service = HatchetEventService()
-    
-    file_coll = TenantCollection(db.get_files_collection(), org_id)
-    file_service = FileService(file_coll, org_id, event_service)
-    
-    parse_coll = TenantCollection(db.get_file_parse_collection(), org_id)
-    parse_service = LlamaParseService(parse_coll, file_service, event_service)
-    
-    # Graph RAG from environment
-    neo4j_uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
-    neo4j_user = os.getenv("NEO4J_USERNAME") or os.getenv("NEO4J_USER", "neo4j")
-    neo4j_password = os.getenv("NEO4J_PASSWORD", "password")
-    graph_service = Neo4JGraphRagService(neo4j_uri, neo4j_user, neo4j_password, org_id)
-    
-    from app.services.rag_service import MongoVectorDbRagService
-    rag_coll = TenantCollection(db.get_rag_collection(), org_id)
-    rag_service = MongoVectorDbRagService(rag_coll)
-    
-    return ChatService(
-        agent_service=agent_service, 
-        collection=collection,
-        file_service=file_service,
-        parse_service=parse_service,
-        graph_rag_service=graph_service,
-        rag_service=rag_service
-    )
 
 @router.post("", response_model=ChatResponse)
 async def create_chat(

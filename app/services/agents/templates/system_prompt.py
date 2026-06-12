@@ -59,13 +59,13 @@ def get_search_memory_config() -> dict:
     }
 
 
-def get_search_memory_v2_config() -> dict:
+def get_rag_search_config() -> dict:
     return {
-        "name": "search_memory_v2",
-        "description": "Advanced memory search using Graph RAG.",
+        "name": "rag_search",
+        "description": "Performs a hybrid search combining vector search and full text search, followed by reranking.",
         "instructions": (
-            "Use `search_memory_v2` (Graph RAG) for complex, entity-centric, or multi-hop queries. "
-            "This tool is superior for connecting disparate facts across documents and understanding relationships."
+            "Use `rag_search` (Hybrid RAG) to find relevant context, facts, and documents from the knowledge base to answer user queries. "
+            "It is highly recommended for retrieving specific information or data mentioned in the documents."
         ),
         "priority": 8
     }
@@ -203,7 +203,7 @@ def get_generic_tool_config(name: str) -> dict:
 TOOL_CONFIG_REGISTRY = {
     "delegate_task": get_delegate_task_config,
     "search_memory": get_search_memory_config,
-    "search_memory_v2": get_search_memory_v2_config,
+    "rag_search": get_rag_search_config,
     "web_search": get_web_search_config,
     "get_available_agents": get_get_available_agents_config,
     "create_agent": get_create_agent_config,
@@ -221,8 +221,8 @@ def get_retrieval_sequence_instruction(available_tools: List[str]) -> str:
     retrieval_tools = []
     if "search_memory" in available_tools:
         retrieval_tools.append("**`search_memory` (Basic RAG)**: Use for straightforward lookups of specific terms or snippets when you expect a direct match in the document knowledge base.")
-    if "search_memory_v2" in available_tools:
-        retrieval_tools.append("**`search_memory_v2` (Graph RAG)**: Use for complex, entity-centric, or multi-hop queries. This tool is superior for connecting disparate facts across documents and understanding relationships.")
+    if "rag_search" in available_tools:
+        retrieval_tools.append("**`rag_search` (Hybrid RAG)**: Performs a hybrid search combining vector search and full text search, followed by reranking. Use this to retrieve factual context from uploaded documents.")
     if "web_search" in available_tools:
         retrieval_tools.append("**`web_search` (Internet)**: Use for real-time data, industry standards, broad public facts, or when local memory is insufficient or yields no results.")
         
@@ -237,23 +237,23 @@ def get_retrieval_sequence_instruction(available_tools: List[str]) -> str:
 
 
 def get_verification_policy(available_tools: List[str]) -> str:
-    has_v2 = "search_memory_v2" in available_tools
+    has_rag_search = "rag_search" in available_tools
     has_web = "web_search" in available_tools
     
-    if not has_v2 and not has_web:
+    if not has_rag_search and not has_web:
         return ""
         
     policy_lines = ["**Mandatory Entity Research & Verification Policy**:"]
     policy_lines.append("- **Pre-emptive Reflection**: Before responding to any query, reflect: *\"Does this query mention a uniquely identifiable entity (e.g., a specific project, organization, person, or technical term) or a factual claim that requires verification?\"*")
     
-    if has_v2 and has_web:
-        policy_lines.append("- **Research Mandate**: If the answer is **YES**, you MUST trigger at least one retrieval step using `search_memory_v2` or `web_search` before generating a final response, even if you believe you have partial information.")
-        policy_lines.append("- **Internal Facts**: For critical internal data or complex relationships, always verify using `search_memory_v2` for cross-referencing.")
+    if has_rag_search and has_web:
+        policy_lines.append("- **Research Mandate**: If the answer is **YES**, you MUST trigger at least one retrieval step using `rag_search` or `web_search` before generating a final response, even if you believe you have partial information.")
+        policy_lines.append("- **Internal Facts**: For critical internal data or complex relationships, always verify using `rag_search` for cross-referencing.")
         policy_lines.append("- **External Facts**: Always verify public factual claims (dates, standard procedures, external documentation) using `web_search`.")
-        policy_lines.append("- **Cross-Verification**: For high-stakes responses, cross-reference findings from both `search_memory_v2` and `web_search` to ensure internal consistency and external accuracy. If sources conflict, state this clearly and provide the evidence from each.")
-    elif has_v2:
-        policy_lines.append("- **Research Mandate**: If the answer is **YES**, you MUST trigger a retrieval step using `search_memory_v2` before generating a final response, even if you believe you have partial information.")
-        policy_lines.append("- **Internal & Entity Facts**: For critical data, complex relationships, or entities, always verify using `search_memory_v2` for cross-referencing.")
+        policy_lines.append("- **Cross-Verification**: For high-stakes responses, cross-reference findings from both `rag_search` and `web_search` to ensure internal consistency and external accuracy. If sources conflict, state this clearly and provide the evidence from each.")
+    elif has_rag_search:
+        policy_lines.append("- **Research Mandate**: If the answer is **YES**, you MUST trigger a retrieval step using `rag_search` before generating a final response, even if you believe you have partial information.")
+        policy_lines.append("- **Internal & Entity Facts**: For critical data, complex relationships, or entities, always verify using `rag_search` for cross-referencing.")
     elif has_web:
         policy_lines.append("- **Research Mandate**: If the answer is **YES**, you MUST trigger a retrieval step using `web_search` before generating a final response, even if you believe you have partial information.")
         policy_lines.append("- **External & Entity Facts**: Always verify public factual claims (dates, standard procedures, external documentation) or entities using `web_search`.")

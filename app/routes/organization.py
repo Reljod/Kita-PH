@@ -5,12 +5,10 @@ from app.models.organization import (
 )
 from app.models.user import UserResponse
 from app.security import get_current_user, require_org_membership
+from app.dependencies import get_org_service
 from app.services.organization_service import OrganizationService
 
 router = APIRouter(prefix="/org", tags=["org"])
-
-def get_org_service():
-    return OrganizationService()
 
 async def run_org_scaffolding(org_id: str):
     from app.services.llm_service import LlmService

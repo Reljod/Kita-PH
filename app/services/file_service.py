@@ -8,10 +8,9 @@ from app.models.file import FileDocument, FileUploadRequest, FileUploadResponse,
 from app.services.event_service import IEventService
 
 class FileService:
-    def __init__(self, collection: TenantCollection, org_id: str, event_service: IEventService, agent_id: Optional[str] = None):
+    def __init__(self, collection: TenantCollection, org_id: str, event_service: IEventService):
         self.collection = collection
         self.org_id = org_id
-        self.agent_id = agent_id
         self.event_service = event_service
         
         supabase_url = os.getenv("SUPABASE_URL")
@@ -40,7 +39,7 @@ class FileService:
             size=req.size,
             content_type=req.content_type,
             org_id=self.org_id,
-            agent_id=req.agent_id or self.agent_id,
+            agent_id=req.agent_id,
             metadata=req.metadata or {},
             status=FileStatus.PENDING
         )
@@ -81,11 +80,9 @@ class FileService:
 
     async def get_files(self, agent_id: Optional[str] = None) -> List[FileResponse]:
         query = {}
-        target_agent_id = agent_id or self.agent_id
-        
-        if target_agent_id:
+        if agent_id:
             # Show agent-specific files AND organization-wide files
-            query["$or"] = [{"agent_id": target_agent_id}, {"agent_id": None}]
+            query["$or"] = [{"agent_id": agent_id}, {"agent_id": None}]
         else:
             # Show ONLY organization-wide files
             query["agent_id"] = None

@@ -1,22 +1,28 @@
-import logfire
 import os
 import warnings
+
+# Disable gRPC fork handlers to suppress fork warnings on MacOS
+os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "0"
+
+# Suppress deprecation warnings from libraries
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="websockets")
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="uvicorn")
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="hatchet_sdk")
+
+import logging
+import logfire
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
-from pydantic_ai import Agent
 
-# Suppress deprecation warnings from websockets/uvicorn
-warnings.filterwarnings("ignore", category=DeprecationWarning, module="websockets")
-warnings.filterwarnings("ignore", category=DeprecationWarning, module="uvicorn")
 
 # Load environment variables, prioritizing .env.local if it exists
 load_dotenv(".env.local")
 load_dotenv()
 
 from app.db import db
-from app.routes import chat, memory, agent, llm, auth, user, organization, tool, file, event
+from app.routes import chat, memory, agent, llm, auth, user, organization, tool, file, event, rag
 from app.routes.webhook import facebook
 from app.security import require_org_membership
 from fastapi import Depends
@@ -46,9 +52,28 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-logfire.configure(distributed_tracing=False)
+log_level_str = os.getenv("LOG_LEVEL", "INFO").upper()
+if log_level_str not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
+    log_level_str = "INFO"
+
+logfire.configure(
+    distributed_tracing=False,
+    scrubbing=False,
+    console=logfire.ConsoleOptions(
+        min_log_level=log_level_str.lower(),
+        span_style='indented',
+        include_timestamps=True,
+    )
+)
 logfire.instrument_pydantic_ai()
 logfire.instrument_fastapi(app)
+
+# Hook standard library logging to logfire console
+logging.basicConfig(
+    handlers=[logfire.LogfireLoggingHandler()],
+    level=getattr(logging, log_level_str),
+    force=True
+)
 
 # Configure CORS
 allowed_origins = [
@@ -89,6 +114,7 @@ app.include_router(agent.router, dependencies=protected_deps)
 app.include_router(tool.router, dependencies=protected_deps)
 app.include_router(file.router, dependencies=protected_deps)
 app.include_router(event.router, dependencies=protected_deps)
+app.include_router(rag.router, dependencies=protected_deps)
 
 @app.get("/")
 def root():
@@ -100,4 +126,14 @@ def root():
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    log_level_str = os.getenv("LOG_LEVEL", "INFO").upper()
+    if log_level_str not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
+        log_level_str = "INFO"
+    reload_mode = os.getenv("RELOAD", "false").lower() in ("true", "1", "yes") or log_level_str == "DEBUG"
+    uvicorn.run(
+        "main:app", 
+        host="0.0.0.0", 
+        port=port, 
+        log_level=log_level_str.lower(),
+        reload=reload_mode
+    )

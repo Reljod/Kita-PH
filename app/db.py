@@ -59,6 +59,10 @@ class Database:
     def get_file_parse_collection(cls) -> Collection:
         return cls.db["file_parse"]
 
+    @classmethod
+    def get_file_parsed_flattened_collection(cls) -> Collection:
+        return cls.db["file_parsed_flattened"]
+
 db = Database()
 
 from typing import Mapping, Any, Optional
