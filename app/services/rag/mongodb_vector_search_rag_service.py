@@ -37,12 +37,12 @@ class MongoDBVectorSearchRagService:
         Finds the top leaf nodes using Atlas Vector Search.
         """
         query_embedding = await self.create_embedding(query)
-        
+
         # Atlas Vector Search Stage
         pipeline = [
             {
                 "$vectorSearch": {
-                    "index": "vector_index", # default Atlas vector index name on file_parsed_flattened
+                    "index": "knowledge_base_rag", # default Atlas vector index name on file_parsed_flattened
                     "path": "embedding",
                     "queryVector": query_embedding,
                     "numCandidates": limit * 10,
@@ -50,7 +50,7 @@ class MongoDBVectorSearchRagService:
                 }
             }
         ]
-        
+
         # Build filter conditions
         # In TenantCollection, org_id filter is injected automatically.
         # We can also add agent_id scoping if requested.
@@ -69,13 +69,13 @@ class MongoDBVectorSearchRagService:
             pipeline.append({
                 "$match": agent_filter
             })
-            
+
         pipeline.append({
             "$set": {
                 "search_score": {"$meta": "vectorSearchScore"}
             }
         })
-        
+
         try:
             docs = list(self.collection.aggregate(pipeline))
             return docs
