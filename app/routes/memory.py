@@ -1,10 +1,8 @@
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, status, Query, Header
 from typing import List, Optional
 from app.models.rag import RagCreateRequest, RagResponse, RagUpdateRequest
-from app.models.graph_rag import GraphRagSearchResult
 from app.services.rag_service import IRagService
-from app.services.graph_rag_service import GraphRagService
-from app.dependencies import get_rag_service, get_graph_rag_service
+from app.dependencies import get_rag_service
 
 router = APIRouter(prefix="/memory", tags=["Memory"])
 
@@ -41,27 +39,6 @@ async def search_memory(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error searching memory: {str(e)}")
 
-@router.get("/search/v2", response_model=List[GraphRagSearchResult])
-async def search_memory_v2(
-    query: str = Query(..., description="The search query to find relevant information in graph RAG memory."), 
-    limit: int = Query(5, description="The maximum number of results to return."), 
-    agent_id: Optional[str] = Query(None, description="Optional agent ID filter"),
-    filename: Optional[str] = Query(None, description="Optional filename filter"),
-    graph_rag_service: GraphRagService = Depends(get_graph_rag_service)
-):
-    """
-    Graph-based RAG search with flexible filtering.
-    """
-    try:
-        filters = {}
-        if agent_id:
-            filters["agent_id"] = agent_id
-        if filename:
-            filters["filename"] = filename
-            
-        return await graph_rag_service.query(query, limit=limit, filters=filters)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error searching graph memory: {str(e)}")
 
 @router.get("/{rag_id}", response_model=RagResponse)
 async def get_rag(

@@ -5,9 +5,6 @@ from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional, Protocol
 from bson import ObjectId
 from pydantic import BaseModel, Field
-from pydantic_ai import Agent
-from pydantic_ai.models.openrouter import OpenRouterModel
-from pydantic_ai.providers.openrouter import OpenRouterProvider
 import logfire
 
 from app.models.rag import RagResponse
@@ -17,8 +14,6 @@ from app.services.rag.mongodb_vector_search_rag_service import MongoDBVectorSear
 from app.services.rag.mongodb_text_search_rag_service import MongoDBTextSearchRagService
 from app.services.rag.reranking_rag_service import RerankingRagService
 
-class EvaluationResult(BaseModel):
-    is_sufficient: bool = Field(description="True if the context provides enough information to fully answer the query, False otherwise.")
 
 class IRetrievalService(Protocol):
     async def search(self, query: str, limit: int = 5) -> List[RagResponse]:
@@ -42,17 +37,6 @@ class RetrievalService(IRetrievalService):
         self.parse_collection = parse_collection
         self.nested_data_enrichment_service = nested_data_enrichment_service
         self.agent_id = agent_id
-        self._llm_model = None
-
-    def _get_llm_model(self):
-        if self._llm_model is None:
-            model_name = "deepseek/deepseek-v4-flash"
-            api_key = os.getenv("OPENROUTER_API_KEY", "")
-            self._llm_model = OpenRouterModel(
-                model_name,
-                provider=OpenRouterProvider(api_key=api_key)
-            )
-        return self._llm_model
 
     async def search(self, query: str, limit: int = 5) -> List[RagResponse]:
         """
@@ -145,39 +129,9 @@ class RetrievalService(IRetrievalService):
         logfire.info("Stage 4 Cross-Encoder reranking completed: reranked_candidates={count}", count=len(reranked_candidates))
         logfire.info("Stage 4 reranked candidates texts: {texts}", texts=[{"path": doc.get("json_path"), "text": doc.get("context_text")} for doc in reranked_candidates])
 
-        # 6. Stateful Recursive Retrieval (Agentic Loop) on the top candidates
-        final_candidates = []
-        for cand in reranked_candidates:
-            fid = cand.get("file_id")
-            path = cand.get("json_path")
-
-            # Skip recursion for manual inputs or missing trees
-            if path == "manual_input" or not fid or fid not in trees_map:
-                final_candidates.append(cand)
-                continue
-
-            # Perform stateful recursive evaluation loop
-            updated_cand = await self._recursive_evaluation_loop(query, cand, trees_map[fid])
-            final_candidates.append(updated_cand)
-
-        logfire.info("Stage 6 final candidates (before dedup) texts: {texts}", texts=[{"path": doc.get("json_path"), "text": doc.get("context_text")} for doc in final_candidates])
-
-        # Deduplicate final candidates after recursive evaluation
-        unique_final_candidates = []
-        seen_final_keys = set()
-        for cand in final_candidates:
-            fid = cand.get("file_id")
-            path = cand.get("json_path")
-            if fid and path and path != "manual_input":
-                key = (fid, path)
-            else:
-                key = str(cand.get("_id") or id(cand))
-
-            if key not in seen_final_keys:
-                seen_final_keys.add(key)
-                unique_final_candidates.append(cand)
-
-        logfire.info("Stage 6 unique final candidates texts: {texts}", texts=[{"path": doc.get("json_path"), "text": doc.get("context_text")} for doc in unique_final_candidates])
+        # 6. Stateful Recursive Retrieval (Agentic Loop) on the top candidates - REMOVED
+        unique_final_candidates = reranked_candidates
+        logfire.info("Stage 6 skipped recursive loop: final candidates texts: {texts}", texts=[{"path": doc.get("json_path"), "text": doc.get("context_text")} for doc in unique_final_candidates])
 
         # 7. Final Rerank and format output (take top `limit`, default 5)
         final_reranked = await self.reranking_service.rerank(query, unique_final_candidates, limit=limit)
@@ -272,70 +226,6 @@ class RetrievalService(IRetrievalService):
             return heading_prefix + "\n".join(lines)
         return heading_prefix + str(val)
 
-    async def _recursive_evaluation_loop(self, query: str, candidate: dict, tree: dict) -> dict:
-        """Stateful agentic loop evaluating context sufficiency using deepseek-v4-flash."""
-        path = candidate["json_path"]
-        fid = candidate["file_id"]
-
-        # Agent for lightweight evaluation
-        agent = Agent(
-            model=self._get_llm_model(),
-            output_type=EvaluationResult,
-            system_prompt=(
-                "You are an expert evaluator. Given a user query and a retrieved text/JSON block, "
-                "determine whether the block contains sufficient details to accurately and fully answer the query. "
-                "Respond with is_sufficient = True or False."
-            )
-        )
-
-        max_iterations = 3
-        current_path = path
-
-        for iteration in range(max_iterations):
-            # Fetch sub-tree
-            sub_tree_val = get_nested_value(tree, current_path.split("."))
-            if sub_tree_val is None:
-                break
-
-            serialized_content = self._serialize_sub_tree(candidate.get("heading_text") or "", sub_tree_val)
-
-            # Circuit Breaker 1: Token/Byte size limit (8,000 tokens ≈ 32,000 bytes)
-            byte_size = len(serialized_content.encode('utf-8'))
-            if byte_size > 32000:
-                # Halt traversal: context size limit reached
-                break
-
-            # Call evaluator
-            prompt = f"Query: {query}\nContext Content:\n{serialized_content}"
-            try:
-                eval_res = await agent.run(prompt)
-                is_sufficient = eval_res.output.is_sufficient
-            except Exception as e:
-                logfire.error("Evaluator error on iteration {iteration}: {error}", iteration=iteration, error=str(e))
-                is_sufficient = True # Fallback: stop loop to be safe
-
-            logfire.info("Agentic evaluation: iteration={iteration}, current_path={current_path}, byte_size={byte_size}, is_sufficient={is_sufficient}",
-                         iteration=iteration, current_path=current_path, byte_size=byte_size, is_sufficient=is_sufficient)
-            if is_sufficient:
-                # Context is sufficient! Return immediately.
-                candidate["json_path"] = current_path
-                candidate["sub_tree_val"] = sub_tree_val
-                candidate["context_text"] = serialized_content
-                return candidate
-
-            # Move up one level: chop off the last key of the path
-            if "." in current_path:
-                current_path = ".".join(current_path.split(".")[:-1])
-            else:
-                # Reached root level, cannot traverse further
-                break
-
-        # Final fallback
-        sub_tree_val = get_nested_value(tree, current_path.split("."))
-        candidate["json_path"] = current_path
-        candidate["sub_tree_val"] = sub_tree_val
-        candidate["context_text"] = self._serialize_sub_tree(candidate.get("heading_text") or "", sub_tree_val)
-        return candidate
 
     def _format_response(self, doc: dict, query: str) -> RagResponse:
         return RagResponse(

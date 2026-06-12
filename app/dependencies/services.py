@@ -132,14 +132,16 @@ class ServiceRegistry:
             parse_collection=TenantCollection(db.get_file_parse_collection(), org_id),
             nested_data_enrichment_service=self.nested_data_enrichment_service
         )
+        from app.services.adaptive_rag_service import AdaptiveRagService
+        self.adaptive_rag_service = AdaptiveRagService(
+            org_id=org_id,
+            retrieval_service=self.retrieval_service,
+            web_search_service=self.web_search_service
+        )
         
         self.chat_service = ChatService(
             agent_service=self.agent_service,
-            collection=TenantCollection(db.get_chats_collection(), org_id),
-            file_service=self.file_service,
-            parse_service=self.parse_service,
-            graph_rag_service=self.graph_rag_service,
-            rag_service=self.rag_service
+            collection=TenantCollection(db.get_chats_collection(), org_id)
         )
 
 
@@ -252,5 +254,11 @@ def get_retrieval_service(
     org_id: str = Depends(get_current_org_id)
 ) -> IRetrievalService:
     return get_services(org_id).retrieval_service
+
+
+def get_adaptive_rag_service(
+    org_id: str = Depends(get_current_org_id)
+) -> Any:
+    return get_services(org_id).adaptive_rag_service
 
 
