@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from pydantic_ai import Agent
 from pydantic_ai.models.openrouter import OpenRouterModel
 from pydantic_ai.providers.openrouter import OpenRouterProvider
+import logfire
 
 from app.models.rag import RagResponse
 from app.db import TenantCollection
@@ -57,14 +58,19 @@ class RetrievalService(IRetrievalService):
         """
         Retrieval Service orchestrates the Ultimate Structured RAG Pipeline.
         """
+        logfire.info("Starting RAG search: query={query!r}, limit={limit}", query=query, limit=limit)
+        
         # 1. Parallel search against the flattened leaves (Stage One)
         vector_task = self.vector_service.vector_search(query, limit=100, agent_id=self.agent_id)
         text_task = self.text_service.text_search(query, limit=100, agent_id=self.agent_id)
         
         vector_results, text_results = await asyncio.gather(vector_task, text_task)
+        logfire.info("Stage 1 completed: vector_results={vector_count}, text_results={text_count}", 
+                     vector_count=len(vector_results), text_count=len(text_results))
         
         # 2. Reciprocal Rank Fusion Merger (Stage Two)
         rrf_candidates = self._apply_rrf(vector_results, text_results, limit=100)
+        logfire.info("Stage 2 RRF fusion completed: rrf_candidates={count}", count=len(rrf_candidates))
         if not rrf_candidates:
             return []
             
@@ -86,6 +92,7 @@ class RetrievalService(IRetrievalService):
             
         # Run Auto-Merging sibling threshold
         merged_candidates = self._auto_merge_siblings(rrf_candidates, trees_map, threshold_ratio=0.35)
+        logfire.info("Stage 3 Auto-merging siblings completed: merged_candidates={count}", count=len(merged_candidates))
         
         # 4. Fetch sub-trees and serialize content
         resolved_candidates = []
@@ -109,9 +116,25 @@ class RetrievalService(IRetrievalService):
             cand["context_text"] = self._serialize_sub_tree(cand.get("heading_text") or "", sub_tree_val)
             resolved_candidates.append(cand)
             
+        # Deduplicate resolved candidates by (file_id, json_path)
+        unique_resolved_candidates = []
+        seen_resolved_keys = set()
+        for cand in resolved_candidates:
+            fid = cand.get("file_id")
+            path = cand.get("json_path")
+            if fid and path and path != "manual_input":
+                key = (fid, path)
+            else:
+                key = str(cand.get("_id") or id(cand))
+            
+            if key not in seen_resolved_keys:
+                seen_resolved_keys.add(key)
+                unique_resolved_candidates.append(cand)
+
         # 5. Stage Four: Cross-Encoder Reranking
         # Scores the sub-trees and filters out the bottom 90%
-        reranked_candidates = await self.reranking_service.rerank(query, resolved_candidates, limit=10)
+        reranked_candidates = await self.reranking_service.rerank(query, unique_resolved_candidates, limit=10)
+        logfire.info("Stage 4 Cross-Encoder reranking completed: reranked_candidates={count}", count=len(reranked_candidates))
         
         # 6. Stateful Recursive Retrieval (Agentic Loop) on the top candidates
         final_candidates = []
@@ -128,8 +151,24 @@ class RetrievalService(IRetrievalService):
             updated_cand = await self._recursive_evaluation_loop(query, cand, trees_map[fid])
             final_candidates.append(updated_cand)
             
+        # Deduplicate final candidates after recursive evaluation
+        unique_final_candidates = []
+        seen_final_keys = set()
+        for cand in final_candidates:
+            fid = cand.get("file_id")
+            path = cand.get("json_path")
+            if fid and path and path != "manual_input":
+                key = (fid, path)
+            else:
+                key = str(cand.get("_id") or id(cand))
+            
+            if key not in seen_final_keys:
+                seen_final_keys.add(key)
+                unique_final_candidates.append(cand)
+
         # 7. Final Rerank and format output (take top `limit`, default 5)
-        final_reranked = await self.reranking_service.rerank(query, final_candidates, limit=limit)
+        final_reranked = await self.reranking_service.rerank(query, unique_final_candidates, limit=limit)
+        logfire.info("RAG search finished. Returning {count} final responses.", count=len(final_reranked))
         
         # Format as RagResponse for compatibility
         return [self._format_response(cand, query) for cand in final_reranked]
@@ -258,9 +297,11 @@ class RetrievalService(IRetrievalService):
                 eval_res = await agent.run(prompt)
                 is_sufficient = eval_res.output.is_sufficient
             except Exception as e:
-                print(f"Evaluator error on iteration {iteration}: {e}")
+                logfire.error("Evaluator error on iteration {iteration}: {error}", iteration=iteration, error=str(e))
                 is_sufficient = True # Fallback: stop loop to be safe
                 
+            logfire.info("Agentic evaluation: iteration={iteration}, current_path={current_path}, byte_size={byte_size}, is_sufficient={is_sufficient}",
+                         iteration=iteration, current_path=current_path, byte_size=byte_size, is_sufficient=is_sufficient)
             if is_sufficient:
                 # Context is sufficient! Return immediately.
                 candidate["json_path"] = current_path
