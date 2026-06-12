@@ -13,7 +13,7 @@ class AdaptiveRagService:
         self.retrieval_service = retrieval_service
         self.web_search_service = web_search_service
         self.api_key = os.getenv("OPENROUTER_API_KEY", "")
-        self.model_name = os.getenv("ROUTER_LLM_MODEL", "openai/gpt-4o-mini")
+        self.model_name = os.getenv("ROUTER_LLM_MODEL", "deepseek/deepseek-v4-flash")
         
         # Instantiate AsyncOpenAI client
         self.client = AsyncOpenAI(
@@ -58,6 +58,69 @@ class AdaptiveRagService:
         except Exception as e:
             logfire.error("Adaptive RAG cheap LLM call failed: {error}", error=str(e))
             raise e
+
+    def _format_chat_history(self, message_history: Optional[List[Any]], limit: int = 5) -> str:
+        """Formats the last N turns of Pydantic AI messages into a plain text transcript."""
+        if not message_history:
+            return ""
+        
+        transcript = []
+        for msg in message_history[-limit:]:
+            if isinstance(msg, dict):
+                role = msg.get("role", "")
+                parts = msg.get("parts", [])
+                role_label = "User" if role in ["user", "ModelRequest"] else "Agent"
+                for part in parts:
+                    if isinstance(part, dict):
+                        if "content" in part:
+                            transcript.append(f"{role_label}: {part['content']}")
+            else:
+                role = msg.__class__.__name__
+                role_label = "User" if role == "ModelRequest" else "Agent"
+                parts = getattr(msg, "parts", [])
+                for part in parts:
+                    part_name = part.__class__.__name__
+                    if part_name in ["UserPrompt", "TextPart"]:
+                        content = getattr(part, "content", "")
+                        if content:
+                            transcript.append(f"{role_label}: {content}")
+                            
+        return "\n".join(transcript)
+
+    async def condense_query(self, query: str, message_history: Optional[List[Any]]) -> str:
+        """Rewrites the user's query to incorporate context from message_history."""
+        if not message_history:
+            return query
+            
+        history_str = self._format_chat_history(message_history)
+        if not history_str:
+            return query
+            
+        system_prompt = (
+            "You are an expert query condenser. Your job is to analyze the conversation history "
+            "and the latest user query, then output a standalone query that can be searched "
+            "without needing to read the chat history. Resolve any pronouns and add necessary context from the conversation.\n"
+            "Output ONLY the standalone rewritten query, no conversational padding or quotes."
+        )
+        user_prompt = (
+            f"Rules for rewriting the query:\n"
+            f"1. Check the Chat History below to understand the current context.\n"
+            f"2. Rewrite the Latest Query to be a standalone search query.\n"
+            f"3. Resolve all ambiguous pronouns (like 'it', 'they', 'that') and add missing context/topics from the Chat History.\n"
+            f"4. Output ONLY the rewritten standalone query, with no quotes or introduction.\n\n"
+            f"Chat History:\n{history_str}\n\n"
+            f"Latest Query: {query}\n\n"
+            f"Standalone Query:"
+        )
+        
+        try:
+            res = await self._call_cheap_llm(system_prompt, user_prompt)
+            condensed = res.strip().replace('"', '').replace("'", "")
+            logfire.info("Adaptive RAG query condensation: raw={query!r} -> condensed={condensed!r}", query=query, condensed=condensed)
+            return condensed
+        except Exception as e:
+            logfire.warning("Adaptive RAG query condensation failed: {error}", error=str(e))
+            return query
 
     async def route_query(self, query: str) -> str:
         """Classifies the query into 'vector', 'web', or 'none'."""
@@ -187,12 +250,15 @@ class AdaptiveRagService:
 
     async def run_agentic_flow(self, query: str, agent, message_history, agent_id: Optional[str] = None) -> Any:
         """Executes the complete Adaptive RAG + Self-RAG loop."""
+        # 0. Condense query if history exists
+        standalone_query = await self.condense_query(query, message_history)
+
         # 1. Route query
-        strategy = await self.route_query(query)
-        logfire.info("Adaptive RAG: query={query!r} routed to strategy={strategy!r}", query=query, strategy=strategy)
+        strategy = await self.route_query(standalone_query)
+        logfire.info("Adaptive RAG: query={query!r} (condensed={standalone_query!r}) routed to strategy={strategy!r}", query=query, standalone_query=standalone_query, strategy=strategy)
         
         visited_strategies = {strategy}
-        current_query = query
+        current_query = standalone_query
         relevant_facts = []
         
         if strategy != "none":
@@ -205,7 +271,7 @@ class AdaptiveRagService:
                     logfire.info("Adaptive RAG: No relevant facts found. Failing over to {alt_strategy}", alt_strategy=alt_strategy)
                     visited_strategies.add(alt_strategy)
                     strategy = alt_strategy
-                    current_query = await self.rewrite_query(query)
+                    current_query = await self.rewrite_query(standalone_query)
                     relevant_facts = await self.retrieve_facts(strategy, current_query)
 
         # Loop for Generation & Evaluation (Self-RAG)
@@ -253,7 +319,7 @@ class AdaptiveRagService:
                 continue
                 
             # Grade completeness
-            is_complete = await self.grade_completeness(query, draft_response)
+            is_complete = await self.grade_completeness(standalone_query, draft_response)
             if is_complete:
                 logfire.info("Adaptive RAG: Answer is complete and grounded! Returning result.")
                 return result
@@ -265,7 +331,7 @@ class AdaptiveRagService:
                     logfire.info("Adaptive RAG: Failing over from {strategy} to {alt_strategy}", strategy=strategy, alt_strategy=alt_strategy)
                     visited_strategies.add(alt_strategy)
                     strategy = alt_strategy
-                    current_query = await self.rewrite_query(current_query)
+                    current_query = await self.rewrite_query(standalone_query)
                     relevant_facts = await self.retrieve_facts(strategy, current_query)
                 else:
                     # If we already tried all strategies, try rewriting the query and searching again
