@@ -58,6 +58,7 @@ if log_level_str not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
 
 logfire.configure(
     distributed_tracing=False,
+    scrubbing=False,
     console=logfire.ConsoleOptions(
         min_log_level=log_level_str.lower(),
         span_style='indented',

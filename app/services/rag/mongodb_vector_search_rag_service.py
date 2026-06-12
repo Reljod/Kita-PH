@@ -1,9 +1,23 @@
+import os
 import asyncio
 from typing import List, Optional, Dict, Any
+
 from app.db import TenantCollection
 
+
+def _get_openrouter_client():
+    """Returns an openai.AsyncOpenAI client pointed at OpenRouter's embeddings endpoint."""
+    from openai import AsyncOpenAI
+    return AsyncOpenAI(
+        api_key=os.getenv("OPENROUTER_API_KEY", ""),
+        base_url="https://openrouter.ai/api/v1",
+    )
+
+
 class MongoDBVectorSearchRagService:
-    _model = None
+    _client = None
+
+    EMBEDDING_MODEL = "perplexity/pplx-embed-v1-0.6b"
 
     def __init__(self, collection: TenantCollection):
         """
@@ -12,25 +26,29 @@ class MongoDBVectorSearchRagService:
         self.collection = collection
 
     @classmethod
-    def get_model(cls):
-        if cls._model is None:
-            from sentence_transformers import SentenceTransformer
-            cls._model = SentenceTransformer('all-MiniLM-L6-v2')
-        return cls._model
+    def get_client(cls):
+        if cls._client is None:
+            cls._client = _get_openrouter_client()
+        return cls._client
 
     async def create_embedding(self, text: str) -> List[float]:
-        model = self.get_model()
-        loop = asyncio.get_event_loop()
-        embedding = await loop.run_in_executor(None, model.encode, text)
-        return embedding.tolist()
+        client = self.get_client()
+        response = await client.embeddings.create(
+            model=self.EMBEDDING_MODEL,
+            input=text,
+        )
+        return response.data[0].embedding
 
     async def bulk_create_embeddings(self, texts: List[str]) -> List[List[float]]:
         if not texts:
             return []
-        model = self.get_model()
-        loop = asyncio.get_event_loop()
-        embeddings = await loop.run_in_executor(None, model.encode, texts)
-        return [emb.tolist() for emb in embeddings]
+        client = self.get_client()
+        response = await client.embeddings.create(
+            model=self.EMBEDDING_MODEL,
+            input=texts,
+        )
+        # Results are returned in the same order as the input
+        return [item.embedding for item in response.data]
 
     async def vector_search(self, query: str, limit: int = 100, agent_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """
