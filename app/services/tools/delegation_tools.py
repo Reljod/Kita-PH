@@ -28,6 +28,18 @@ async def delegate_task(
     
     try:
         sub_agent = agent_service.get_runnable_agent(agent_id=actual_agent_id)
+        
+        # Track status if status_key is provided
+        status_key = ctx.deps.get("status_key")
+        if status_key:
+            try:
+                from app.dependencies.services import get_services
+                services = get_services(ctx.deps.get("org_id"))
+                await services.agent_status_service.update_step(status_key, "delegated_task", actual_agent_id)
+            except Exception as e:
+                import logfire
+                logfire.error("Failed to update status in delegate_task: {error}", error=str(e))
+
         # Run sub-agent with the provided task.
         # We pass the full deps from ctx.deps to allow nested agents access to all tools (RAG, etc.)
         result = await sub_agent.run(

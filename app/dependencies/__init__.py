@@ -13,5 +13,6 @@ from app.dependencies.services import (
     get_agent_rag_service,
     get_chat_service,
     get_retrieval_service,
+    get_agent_status_service,
 )
 

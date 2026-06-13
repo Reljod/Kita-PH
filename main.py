@@ -107,7 +107,7 @@ app.include_router(facebook.router)
 
 # Protected Routers - Require Organization Membership
 protected_deps = [Depends(require_org_membership)]
-app.include_router(chat.router, dependencies=protected_deps)
+app.include_router(chat.router)
 app.include_router(memory.router, dependencies=protected_deps)
 app.include_router(llm.router, dependencies=protected_deps)
 app.include_router(agent.router, dependencies=protected_deps)

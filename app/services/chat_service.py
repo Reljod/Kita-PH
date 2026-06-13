@@ -1,6 +1,6 @@
 from bson import ObjectId
 from datetime import datetime, timezone
-from typing import List, Optional, Dict, Any, Protocol
+from typing import List, Optional, Dict, Any, Protocol, AsyncIterator
 from app.models.chat import ChatCreateRequest, ChatResponse, ChatContinueRequest, ChatDocument
 from pydantic_core import to_jsonable_python
 from pydantic_ai import ModelMessagesTypeAdapter
@@ -8,9 +8,13 @@ from app.services.agent_service import IAgentService
 from app.db import TenantCollection
 
 class IChatService(Protocol):
-    async def create_chat(self, req: ChatCreateRequest, agent_id: Optional[str] = None) -> ChatResponse:
+    async def create_chat(self, req: ChatCreateRequest, agent_id: Optional[str] = None, status_key: Optional[str] = None) -> ChatResponse:
         ...
-    async def continue_chat(self, chat_id: str, req: ChatContinueRequest, agent_id: Optional[str] = None) -> Optional[ChatResponse]:
+    async def continue_chat(self, chat_id: str, req: ChatContinueRequest, agent_id: Optional[str] = None, status_key: Optional[str] = None) -> Optional[ChatResponse]:
+        ...
+    async def create_chat_stream(self, req: ChatCreateRequest, agent_id: Optional[str] = None, status_key: Optional[str] = None) -> AsyncIterator[dict]:
+        ...
+    async def continue_chat_stream(self, chat_id: str, req: ChatContinueRequest, agent_id: Optional[str] = None, status_key: Optional[str] = None) -> AsyncIterator[dict]:
         ...
     def get_chat(self, chat_id: str, agent_id: Optional[str] = None) -> Optional[ChatResponse]:
         ...
@@ -54,19 +58,18 @@ class ChatService(IChatService):
         self.agent_service = agent_service
         self.collection = collection
 
-    async def create_chat(self, req: ChatCreateRequest, agent_id: Optional[str] = None) -> ChatResponse:
+    async def create_chat(self, req: ChatCreateRequest, agent_id: Optional[str] = None, status_key: Optional[str] = None) -> ChatResponse:
         if not agent_id:
             raise ValueError("agent_id is required")
 
-        from app.dependencies.services import get_services
-        services = get_services(self.collection.org_id)
+        chat_id = str(ObjectId())
         
-        agent = self.agent_service.get_runnable_agent(agent_id=agent_id)
-        result = await services.adaptive_rag_service.run_agentic_flow(
+        result = await self.agent_service.run(
+            agent_id=agent_id,
             query=req.message,
-            agent=agent,
             message_history=None,
-            agent_id=agent_id
+            chat_id=chat_id,
+            status_key=status_key
         )
         
         messages_dump = to_jsonable_python(result.all_messages())
@@ -84,12 +87,12 @@ class ChatService(IChatService):
         )
         
         doc = new_chat.model_dump()
-        res = self.collection.insert_one(doc)
-        doc["_id"] = res.inserted_id
+        doc["_id"] = ObjectId(chat_id)
+        self.collection.insert_one(doc)
         
         return format_chat_response(doc)
 
-    async def continue_chat(self, chat_id: str, req: ChatContinueRequest, agent_id: Optional[str] = None) -> Optional[ChatResponse]:
+    async def continue_chat(self, chat_id: str, req: ChatContinueRequest, agent_id: Optional[str] = None, status_key: Optional[str] = None) -> Optional[ChatResponse]:
         try:
             obj_id = ObjectId(chat_id)
         except Exception:
@@ -110,15 +113,12 @@ class ChatService(IChatService):
         # Load history
         message_history = ModelMessagesTypeAdapter.validate_python(chat["messages"])
 
-        from app.dependencies.services import get_services
-        services = get_services(self.collection.org_id)
-        
-        agent = self.agent_service.get_runnable_agent(agent_id=agent_to_run_with)
-        result = await services.adaptive_rag_service.run_agentic_flow(
+        result = await self.agent_service.run(
+            agent_id=agent_to_run_with,
             query=req.message,
-            agent=agent,
             message_history=message_history,
-            agent_id=agent_to_run_with
+            chat_id=chat_id,
+            status_key=status_key
         )
         
         # Dump new history
@@ -141,6 +141,119 @@ class ChatService(IChatService):
         
         updated_doc = self.collection.find_one({"_id": obj_id})
         return format_chat_response(updated_doc)
+
+    async def create_chat_stream(
+        self,
+        req: ChatCreateRequest,
+        agent_id: Optional[str] = None,
+        status_key: Optional[str] = None
+    ) -> AsyncIterator[dict]:
+        if not agent_id:
+            raise ValueError("agent_id is required")
+
+        chat_id = str(ObjectId())
+        
+        final_result = None
+        async for chunk in self.agent_service.run_stream(
+            agent_id=agent_id,
+            query=req.message,
+            message_history=None,
+            chat_id=chat_id,
+            status_key=status_key
+        ):
+            if chunk["type"] == "result":
+                final_result = chunk["result"]
+            else:
+                yield chunk
+
+        if final_result is None:
+            raise ValueError("No run result returned from agent run stream")
+
+        messages_dump = to_jsonable_python(final_result.all_messages())
+        
+        from app.models.agent import parse_agent_id
+        base_agent_id = None
+        if agent_id:
+            base_agent_id, _ = parse_agent_id(agent_id)
+            
+        new_chat = ChatDocument(
+            messages=messages_dump,
+            agent_id=base_agent_id
+        )
+        
+        doc = new_chat.model_dump()
+        doc["_id"] = ObjectId(chat_id)
+        self.collection.insert_one(doc)
+        
+        chat_resp = format_chat_response(doc)
+        yield {"type": "done", "chat": to_jsonable_python(chat_resp)}
+
+    async def continue_chat_stream(
+        self,
+        chat_id: str,
+        req: ChatContinueRequest,
+        agent_id: Optional[str] = None,
+        status_key: Optional[str] = None
+    ) -> AsyncIterator[dict]:
+        try:
+            obj_id = ObjectId(chat_id)
+        except Exception:
+            raise ValueError("Invalid chat ID")
+            
+        chat_query = {"_id": obj_id}
+        if agent_id:
+            chat_query["agent_id"] = agent_id
+            
+        chat = self.collection.find_one(chat_query)
+        if not chat:
+            yield {"type": "error", "message": "Chat not found"}
+            return
+            
+        agent_to_run_with = agent_id or chat.get("agent_id")
+        if not agent_to_run_with:
+            raise ValueError("agent_id is required")
+
+        # Load history
+        message_history = ModelMessagesTypeAdapter.validate_python(chat["messages"])
+
+        final_result = None
+        async for chunk in self.agent_service.run_stream(
+            agent_id=agent_to_run_with,
+            query=req.message,
+            message_history=message_history,
+            chat_id=chat_id,
+            status_key=status_key
+        ):
+            if chunk["type"] == "result":
+                final_result = chunk["result"]
+            else:
+                yield chunk
+
+        if final_result is None:
+            raise ValueError("No run result returned from agent run stream")
+
+        # Dump new history
+        messages_dump = to_jsonable_python(final_result.all_messages())
+        
+        update_fields = {
+            "messages": messages_dump,
+            "updated_at": datetime.now(timezone.utc)
+        }
+        
+        if agent_id:
+            from app.models.agent import parse_agent_id
+            base_agent_id, _ = parse_agent_id(agent_id)
+            update_fields["agent_id"] = base_agent_id
+            
+        self.collection.update_one(
+            {"_id": obj_id},
+            {"$set": update_fields}
+        )
+        
+        updated_doc = self.collection.find_one({"_id": obj_id})
+        chat_resp = format_chat_response(updated_doc)
+        yield {"type": "done", "chat": to_jsonable_python(chat_resp)}
+
 
     def get_chat(self, chat_id: str, agent_id: Optional[str] = None) -> Optional[ChatResponse]:
         try:
