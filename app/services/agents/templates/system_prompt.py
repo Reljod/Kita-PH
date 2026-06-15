@@ -275,7 +275,7 @@ def get_verification_policy(available_tools: List[str]) -> str:
         policy_lines.append(f"- **Research Mandate**: If the answer to your reflection is **YES**, you MUST trigger your retrieval tool calls ({rag_tools_desc} or `web_search`) immediately as your first action before generating a final response, even if you believe you already have partial information.")
         policy_lines.append(f"- **Internal Facts**: For critical data, documents, or complex company relationships, always verify using {rag_tools_desc}.")
         policy_lines.append("- **External Facts**: Always verify public factual claims (dates, standard procedures, external documentation) using `web_search`.")
-        policy_lines.append(f"- **Cross-Verification**: For high-stakes responses, cross-reference findings from both internal memory and `web_search` to ensure internal consistency and external accuracy. If sources conflict, state this clearly and provide the evidence from each.")
+        policy_lines.append("- **Cross-Verification**: For high-stakes responses, cross-reference findings from both internal memory and `web_search` to ensure internal consistency and external accuracy. If sources conflict, state this clearly and provide the evidence from each.")
     elif has_rag_search:
         policy_lines.append(f"- **Research Mandate**: If the answer to your reflection is **YES**, you MUST trigger a retrieval tool call (`{preferred_rag}`) immediately as your first action before generating a final response, even if you believe you already have partial information.")
         policy_lines.append(f"- **Internal & Entity Facts**: For critical data, documents, complex relationships, or entities, always verify using `{preferred_rag}`.")

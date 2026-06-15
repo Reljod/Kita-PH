@@ -1,5 +1,6 @@
 import os
 from bson import ObjectId
+import pymongo
 from typing import List, Optional, Protocol, Any, AsyncIterator
 from datetime import datetime, timezone
 from pydantic_ai import Agent
@@ -52,6 +53,22 @@ class AgentService(IAgentService):
         self.llm_service = llm_service
         self.collection = collection
         self.tools_collection = tools_collection
+        # Counters collection shares the same DB as the agents collection
+        self._counters = collection._collection.database["version_counters"]
+
+    def _next_version(self, base_id: str) -> int:
+        """Atomically allocate the next version number for a given base_id.
+        
+        Uses find_one_and_update with $inc so concurrent callers can never
+        receive the same version number.
+        """
+        result = self._counters.find_one_and_update(
+            {"_id": base_id},
+            {"$inc": {"seq": 1}},
+            upsert=True,
+            return_document=pymongo.ReturnDocument.AFTER
+        )
+        return result["seq"]
 
     async def create_agent(self, req: AgentCreateRequest) -> AgentResponse:
         new_agent = AgentDocument(
@@ -148,7 +165,7 @@ class AgentService(IAgentService):
         latest_doc = self.collection.find_one({"base_id": base_id}, sort=[("version", -1)])
         
         if new_version:
-            new_version_num = latest_doc.get("version", 1) + 1
+            new_version_num = self._next_version(base_id)
             updated_data = {
                 "name": req.name if req.name is not None else latest_doc["name"],
                 "role": req.role if req.role is not None else latest_doc["role"],
@@ -224,7 +241,7 @@ class AgentService(IAgentService):
         
         base_id = doc["base_id"]
         latest_doc = self.collection.find_one({"base_id": base_id}, sort=[("version", -1)])
-        new_version_num = latest_doc.get("version", 1) + 1
+        new_version_num = self._next_version(base_id)
         
         current_tools = list(latest_doc.get("tools", []))
         for tid in tool_ids:
@@ -255,7 +272,7 @@ class AgentService(IAgentService):
         
         base_id = doc["base_id"]
         latest_doc = self.collection.find_one({"base_id": base_id}, sort=[("version", -1)])
-        new_version_num = latest_doc.get("version", 1) + 1
+        new_version_num = self._next_version(base_id)
         
         current_tools = [t for t in latest_doc.get("tools", []) if t not in tool_ids]
                 

@@ -38,18 +38,17 @@ def backfill():
             # Ensure delegate_task is registered for this org
             delegate_tool = tools_coll.find_one({"org_id": org_id, "name": "delegate_task"})
             if not delegate_tool:
-                print(f"Registering missing available tools for org: {org_id}")
-                for t_name, t_desc in available.items():
-                    existing_t = tools_coll.find_one({"org_id": org_id, "name": t_name})
-                    if not existing_t:
-                        tools_coll.insert_one({
-                            "org_id": org_id,
-                            "name": t_name,
-                            "description": t_desc,
-                            "created_at": datetime.now(timezone.utc),
-                            "updated_at": datetime.now(timezone.utc)
-                        })
-                        print(f"Registered tool '{t_name}' for Org '{org_id}'")
+                # Only register the delegate_task tool — stay within backfill scope
+                if "delegate_task" in available:
+                    print(f"Registering 'delegate_task' tool for org: {org_id}")
+                    tools_coll.insert_one({
+                        "org_id": org_id,
+                        "name": "delegate_task",
+                        "description": available["delegate_task"],
+                        "created_at": datetime.now(timezone.utc),
+                        "updated_at": datetime.now(timezone.utc)
+                    })
+                    print(f"Registered tool 'delegate_task' for Org '{org_id}'")
                 
                 # Fetch delegate_tool again after registration
                 delegate_tool = tools_coll.find_one({"org_id": org_id, "name": "delegate_task"})
@@ -63,12 +62,21 @@ def backfill():
             
             # Check if already has it
             if tool_id_str not in current_tools:
-                # Add to tools array
-                agents_coll.update_one(
-                    {"_id": agent["_id"]},
-                    {"$addToSet": {"tools": tool_id_str}}
-                )
-                print(f"Added 'delegate_task' to agent '{agent.get('name')}' (Org: {org_id}).")
+                # Insert a new version document to preserve immutable version history
+                latest_agent = agents_coll.find_one(
+                    {"base_id": agent.get("base_id", str(agent["_id"]))},
+                    sort=[("version", -1)]
+                ) or agent
+                new_version_num = latest_agent.get("version", 1) + 1
+                new_tools = list(latest_agent.get("tools") or [])
+                if tool_id_str not in new_tools:
+                    new_tools.append(tool_id_str)
+                new_doc = {k: v for k, v in latest_agent.items() if k != "_id"}
+                new_doc["tools"] = new_tools
+                new_doc["version"] = new_version_num
+                new_doc["updated_at"] = datetime.now(timezone.utc)
+                agents_coll.insert_one(new_doc)
+                print(f"Added 'delegate_task' to agent '{agent.get('name')}' (Org: {org_id}) as version {new_version_num}.")
                 updated_count += 1
             else:
                 print(f"Agent '{agent.get('name')}' already has 'delegate_task'.")

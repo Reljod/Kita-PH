@@ -1,9 +1,13 @@
+import asyncio
+import logging
 from pydantic_ai import FunctionToolset
 from pydantic import Field
 from typing import Annotated, List, Optional, Dict, Any
 from app.services.rag_service import MongoVectorDbRagService
 from pydantic_ai import RunContext
 from app.db import db, TenantCollection
+
+logger = logging.getLogger(__name__)
 
 memory_toolset = FunctionToolset()
 
@@ -23,9 +27,12 @@ async def search_memory(
         try:
             from app.dependencies.services import get_services
             services = get_services(ctx.deps.get("org_id"))
-            await services.agent_status_service.update_step(status_key, "retrieve_facts_vector", ctx.deps.get("agent_id"))
-        except Exception:
-            pass
+            await asyncio.wait_for(
+                services.agent_status_service.update_step(status_key, "retrieve_facts_vector", ctx.deps.get("agent_id")),
+                timeout=2.0
+            )
+        except Exception as e:
+            logger.warning("search_memory: status update failed: %s", e)
 
     service = ctx.deps.get("rag_service")
     if not service:
@@ -65,9 +72,12 @@ async def rag_search(
         try:
             from app.dependencies.services import get_services
             services = get_services(ctx.deps.get("org_id"))
-            await services.agent_status_service.update_step(status_key, "retrieve_facts_vector", ctx.deps.get("agent_id"))
-        except Exception:
-            pass
+            await asyncio.wait_for(
+                services.agent_status_service.update_step(status_key, "retrieve_facts_vector", ctx.deps.get("agent_id")),
+                timeout=2.0
+            )
+        except Exception as e:
+            logger.warning("rag_search: status update failed: %s", e)
 
     from app.services.rag.retrieval_service import IRetrievalService
     
