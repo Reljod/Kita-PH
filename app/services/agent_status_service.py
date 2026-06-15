@@ -17,6 +17,8 @@ EMOJI_MAP = {
     "grade_completeness": "🏁",
     "rewrite_query": "✍️",
     "generate_response": "🤖",
+    "draft_response": "📝",
+    "finalize_response": "🤖",
     "delegated_task": "🤝"
 }
 
@@ -66,6 +68,14 @@ MESSAGES_MAP = {
         "drafting a response",
         "generating the final answer",
         "formulating the reply"
+    ],
+    "draft_response": [
+        "drafting a response",
+        "formulating the response draft"
+    ],
+    "finalize_response": [
+        "finalizing the answer",
+        "writing the final reply"
     ],
     "delegated_task": [
         "delegating task to sub-agent",

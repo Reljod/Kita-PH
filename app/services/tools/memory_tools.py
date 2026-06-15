@@ -17,6 +17,16 @@ async def search_memory(
     Searches the agent's memory (RAG) for relevant information based on the query.
     This uses MongoDB embeddings for vector search.
     """
+    # Update status key if present in deps
+    status_key = ctx.deps.get("status_key") if ctx.deps else None
+    if status_key:
+        try:
+            from app.dependencies.services import get_services
+            services = get_services(ctx.deps.get("org_id"))
+            await services.agent_status_service.update_step(status_key, "retrieve_facts_vector", ctx.deps.get("agent_id"))
+        except Exception:
+            pass
+
     service = ctx.deps.get("rag_service")
     if not service:
         # Fallback to manual instantiation
@@ -49,6 +59,16 @@ async def rag_search(
     Performs a hybrid search combining vector search and full text search, followed by reranking.
     Use this to retrieve factual context from uploaded documents to answer queries.
     """
+    # Update status key if present in deps
+    status_key = ctx.deps.get("status_key") if ctx.deps else None
+    if status_key:
+        try:
+            from app.dependencies.services import get_services
+            services = get_services(ctx.deps.get("org_id"))
+            await services.agent_status_service.update_step(status_key, "retrieve_facts_vector", ctx.deps.get("agent_id"))
+        except Exception:
+            pass
+
     from app.services.rag.retrieval_service import IRetrievalService
     
     retrieval_service: IRetrievalService = ctx.deps.get("retrieval_service")

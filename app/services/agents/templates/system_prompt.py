@@ -218,44 +218,69 @@ TOOL_CONFIG_REGISTRY = {
 
 
 def get_retrieval_sequence_instruction(available_tools: List[str]) -> str:
-    retrieval_tools = []
-    if "search_memory" in available_tools:
-        retrieval_tools.append("**`search_memory` (Basic RAG)**: Use for straightforward lookups of specific terms or snippets when you expect a direct match in the document knowledge base.")
-    if "rag_search" in available_tools:
-        retrieval_tools.append("**`rag_search` (Hybrid RAG)**: Performs a hybrid search combining vector search and full text search, followed by reranking. Use this to retrieve factual context from uploaded documents.")
-    if "web_search" in available_tools:
-        retrieval_tools.append("**`web_search` (Internet)**: Use for real-time data, industry standards, broad public facts, or when local memory is insufficient or yields no results.")
-        
-    if not retrieval_tools:
+    has_search_mem = "search_memory" in available_tools
+    has_rag_search = "rag_search" in available_tools
+    has_web_search = "web_search" in available_tools
+
+    if not any([has_search_mem, has_rag_search, has_web_search]):
         return ""
-        
+
     sequence_lines = ["When tasked with finding or verifying information, follow this sequence to ensure accuracy and depth:\n"]
-    for idx, tool_desc in enumerate(retrieval_tools, 1):
-        sequence_lines.append(f"{idx}. {tool_desc}")
-        
+
+    if has_search_mem and has_rag_search:
+        sequence_lines.append(
+            "1. **Parallel Memory Search (Default First Step)**: Call both `search_memory` and `rag_search` in parallel (in a single turn) "
+            "to check for relevant internal organization facts, documents, or context."
+        )
+        if has_web_search:
+            sequence_lines.append(
+                "2. **Web Search (Internet)**: Only call `web_search` if the information cannot be found in internal memory (after checking both), "
+                "OR if it is clear from the start that the query is time-sensitive, requires real-time/current data, or refers to external public facts "
+                "that cannot exist in internal documents (e.g. current events, external documentation, public websites)."
+            )
+    else:
+        # Fallback sequence if we don't have both memory search tools
+        idx = 1
+        if has_search_mem:
+            sequence_lines.append(f"{idx}. **`search_memory` (Basic RAG)**: Use for straightforward lookups of specific terms or snippets when you expect a direct match in the document knowledge base.")
+            idx += 1
+        if has_rag_search:
+            sequence_lines.append(f"{idx}. **`rag_search` (Hybrid RAG)**: Performs a hybrid search combining vector search and full text search, followed by reranking. Use this to retrieve factual context from uploaded documents.")
+            idx += 1
+        if has_web_search:
+            sequence_lines.append(
+                f"{idx}. **`web_search` (Internet)**: Only call `web_search` if internal memory is insufficient or yields no results, "
+                "OR if it is clear from the start that the query is time-sensitive, requires real-time/current data, or refers to external public facts."
+            )
+
     return "\n".join(sequence_lines)
 
 
 def get_verification_policy(available_tools: List[str]) -> str:
-    has_rag_search = "rag_search" in available_tools
+    has_rag_search = "rag_search" in available_tools or "search_memory" in available_tools
     has_web = "web_search" in available_tools
     
     if not has_rag_search and not has_web:
         return ""
         
+    preferred_rag = "rag_search" if "rag_search" in available_tools else "search_memory"
+        
     policy_lines = ["**Mandatory Entity Research & Verification Policy**:"]
-    policy_lines.append("- **Pre-emptive Reflection**: Before responding to any query, reflect: *\"Does this query mention a uniquely identifiable entity (e.g., a specific project, organization, person, or technical term) or a factual claim that requires verification?\"*")
+    policy_lines.append("- **Pre-emptive Reflection**: Before drafting *any* part of your response, you MUST explicitly reflect as your very first step: *\"Does this query mention a uniquely identifiable entity (e.g., a specific project, organization, person, or technical term) or a factual claim that requires verification? Do I need additional data or context to answer accurately?\"*")
     
     if has_rag_search and has_web:
-        policy_lines.append("- **Research Mandate**: If the answer is **YES**, you MUST trigger at least one retrieval step using `rag_search` or `web_search` before generating a final response, even if you believe you have partial information.")
-        policy_lines.append("- **Internal Facts**: For critical internal data or complex relationships, always verify using `rag_search` for cross-referencing.")
+        has_both_rag = "search_memory" in available_tools and "rag_search" in available_tools
+        rag_tools_desc = "`search_memory` and `rag_search` (in parallel)" if has_both_rag else f"`{preferred_rag}`"
+        
+        policy_lines.append(f"- **Research Mandate**: If the answer to your reflection is **YES**, you MUST trigger your retrieval tool calls ({rag_tools_desc} or `web_search`) immediately as your first action before generating a final response, even if you believe you already have partial information.")
+        policy_lines.append(f"- **Internal Facts**: For critical data, documents, or complex company relationships, always verify using {rag_tools_desc}.")
         policy_lines.append("- **External Facts**: Always verify public factual claims (dates, standard procedures, external documentation) using `web_search`.")
-        policy_lines.append("- **Cross-Verification**: For high-stakes responses, cross-reference findings from both `rag_search` and `web_search` to ensure internal consistency and external accuracy. If sources conflict, state this clearly and provide the evidence from each.")
+        policy_lines.append(f"- **Cross-Verification**: For high-stakes responses, cross-reference findings from both internal memory and `web_search` to ensure internal consistency and external accuracy. If sources conflict, state this clearly and provide the evidence from each.")
     elif has_rag_search:
-        policy_lines.append("- **Research Mandate**: If the answer is **YES**, you MUST trigger a retrieval step using `rag_search` before generating a final response, even if you believe you have partial information.")
-        policy_lines.append("- **Internal & Entity Facts**: For critical data, complex relationships, or entities, always verify using `rag_search` for cross-referencing.")
+        policy_lines.append(f"- **Research Mandate**: If the answer to your reflection is **YES**, you MUST trigger a retrieval tool call (`{preferred_rag}`) immediately as your first action before generating a final response, even if you believe you already have partial information.")
+        policy_lines.append(f"- **Internal & Entity Facts**: For critical data, documents, complex relationships, or entities, always verify using `{preferred_rag}`.")
     elif has_web:
-        policy_lines.append("- **Research Mandate**: If the answer is **YES**, you MUST trigger a retrieval step using `web_search` before generating a final response, even if you believe you have partial information.")
+        policy_lines.append("- **Research Mandate**: If the answer to your reflection is **YES**, you MUST trigger a retrieval tool call (`web_search`) immediately as your first action before generating a final response, even if you believe you already have partial information.")
         policy_lines.append("- **External & Entity Facts**: Always verify public factual claims (dates, standard procedures, external documentation) or entities using `web_search`.")
         
     return "\n".join(policy_lines)
