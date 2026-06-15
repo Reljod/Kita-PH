@@ -1,9 +1,13 @@
+import asyncio
+import logging
 from pydantic_ai import FunctionToolset
 from pydantic import Field
 from typing import Annotated, Optional
 from pydantic_ai import RunContext
 from app.services.tool_service import ToolService
 from app.services.web_search_service import SerperSearchService
+
+logger = logging.getLogger(__name__)
 
 web_search_toolset = FunctionToolset()
 
@@ -22,6 +26,19 @@ async def web_search(
     Performs a web search to find relevant and up-to-date information.
     Use this tool when you need information from the internet that might not be in your training data.
     """
+    # Update status key if present in deps
+    status_key = ctx.deps.get("status_key") if ctx.deps else None
+    if status_key:
+        try:
+            from app.dependencies.services import get_services
+            services = get_services(ctx.deps.get("org_id"))
+            await asyncio.wait_for(
+                services.agent_status_service.update_step(status_key, "retrieve_facts_web", ctx.deps.get("agent_id")),
+                timeout=2.0
+            )
+        except Exception as e:
+            logger.warning("web_search: status update failed: %s", e)
+
     web_search_service = SerperSearchService()
     service = ToolService(web_search_service)
     try:

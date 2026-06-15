@@ -1,5 +1,6 @@
 import os
 from bson import ObjectId
+import pymongo
 from typing import List, Optional, Protocol, Any, AsyncIterator
 from datetime import datetime, timezone
 from pydantic_ai import Agent
@@ -52,6 +53,22 @@ class AgentService(IAgentService):
         self.llm_service = llm_service
         self.collection = collection
         self.tools_collection = tools_collection
+        # Counters collection shares the same DB as the agents collection
+        self._counters = collection._collection.database["version_counters"]
+
+    def _next_version(self, base_id: str) -> int:
+        """Atomically allocate the next version number for a given base_id.
+        
+        Uses find_one_and_update with $inc so concurrent callers can never
+        receive the same version number.
+        """
+        result = self._counters.find_one_and_update(
+            {"_id": base_id},
+            {"$inc": {"seq": 1}},
+            upsert=True,
+            return_document=pymongo.ReturnDocument.AFTER
+        )
+        return result["seq"]
 
     async def create_agent(self, req: AgentCreateRequest) -> AgentResponse:
         new_agent = AgentDocument(
@@ -148,7 +165,7 @@ class AgentService(IAgentService):
         latest_doc = self.collection.find_one({"base_id": base_id}, sort=[("version", -1)])
         
         if new_version:
-            new_version_num = latest_doc.get("version", 1) + 1
+            new_version_num = self._next_version(base_id)
             updated_data = {
                 "name": req.name if req.name is not None else latest_doc["name"],
                 "role": req.role if req.role is not None else latest_doc["role"],
@@ -222,13 +239,30 @@ class AgentService(IAgentService):
         if not doc:
             return False
         
-        self.collection.update_one(
-            {"_id": doc["_id"]},
-            {
-                "$addToSet": {"tools": {"$each": tool_ids}},
-                "$set": {"updated_at": datetime.now(timezone.utc)}
-            }
-        )
+        base_id = doc["base_id"]
+        latest_doc = self.collection.find_one({"base_id": base_id}, sort=[("version", -1)])
+        new_version_num = self._next_version(base_id)
+        
+        current_tools = list(latest_doc.get("tools", []))
+        for tid in tool_ids:
+            if tid not in current_tools:
+                current_tools.append(tid)
+                
+        updated_data = {
+            "name": latest_doc["name"],
+            "role": latest_doc["role"],
+            "goal": latest_doc["goal"],
+            "backstory": latest_doc["backstory"],
+            "personalities": latest_doc.get("personalities"),
+            "llm_id": latest_doc["llm_id"],
+            "tools": current_tools,
+            "base_id": base_id,
+            "version": new_version_num,
+            "created_at": latest_doc.get("created_at", datetime.now(timezone.utc)),
+            "updated_at": datetime.now(timezone.utc)
+        }
+        
+        self.collection.insert_one(updated_data)
         return True
 
     async def remove_tools(self, agent_id: str, tool_ids: List[str]) -> bool:
@@ -236,13 +270,27 @@ class AgentService(IAgentService):
         if not doc:
             return False
         
-        self.collection.update_one(
-            {"_id": doc["_id"]},
-            {
-                "$pull": {"tools": {"$in": tool_ids}},
-                "$set": {"updated_at": datetime.now(timezone.utc)}
-            }
-        )
+        base_id = doc["base_id"]
+        latest_doc = self.collection.find_one({"base_id": base_id}, sort=[("version", -1)])
+        new_version_num = self._next_version(base_id)
+        
+        current_tools = [t for t in latest_doc.get("tools", []) if t not in tool_ids]
+                
+        updated_data = {
+            "name": latest_doc["name"],
+            "role": latest_doc["role"],
+            "goal": latest_doc["goal"],
+            "backstory": latest_doc["backstory"],
+            "personalities": latest_doc.get("personalities"),
+            "llm_id": latest_doc["llm_id"],
+            "tools": current_tools,
+            "base_id": base_id,
+            "version": new_version_num,
+            "created_at": latest_doc.get("created_at", datetime.now(timezone.utc)),
+            "updated_at": datetime.now(timezone.utc)
+        }
+        
+        self.collection.insert_one(updated_data)
         return True
 
     def get_agents_by_tool(self, tool_id: str) -> List[AgentResponse]:
@@ -290,6 +338,22 @@ class AgentService(IAgentService):
             toolsets=[delegation_toolset]
         )
 
+    def _get_deps(self, agent_id: str, status_key: Optional[str] = None) -> dict[str, Any]:
+        from app.dependencies.services import get_services
+        services = get_services(self.collection.org_id)
+
+        return {
+            "org_id": self.collection.org_id, 
+            "agent_id": agent_id, 
+            "status_key": status_key,
+            "agent_service": self,
+            "file_service": services.file_service,
+            "parse_service": services.parse_service,
+            "graph_rag_service": services.graph_rag_service,
+            "rag_service": services.rag_service,
+            "retrieval_service": services.retrieval_service
+        }
+
     async def run(
         self,
         agent_id: str,
@@ -310,13 +374,20 @@ class AgentService(IAgentService):
 
         try:
             agent = self.get_runnable_agent(agent_id=agent_id)
-            result = await services.adaptive_rag_service.run_agentic_flow(
-                query=query,
-                agent=agent,
+            deps = self._get_deps(agent_id, status_key=status_key)
+
+            if status_key:
+                await services.agent_status_service.update_step(status_key, "draft_response", agent_id)
+
+            result = await agent.run(
+                query,
                 message_history=message_history,
-                agent_id=agent_id,
-                status_key=status_key
+                deps=deps
             )
+
+            if status_key:
+                await services.agent_status_service.update_step(status_key, "finalize_response", agent_id)
+
             if status_key:
                 await services.agent_status_service.finish_session(
                     status_key=status_key,
@@ -353,14 +424,73 @@ class AgentService(IAgentService):
 
         try:
             agent = self.get_runnable_agent(agent_id=agent_id)
-            async for chunk in services.adaptive_rag_service.run_agentic_flow_stream(
-                query=query,
-                agent=agent,
+            deps = self._get_deps(agent_id, status_key=status_key)
+
+            if status_key:
+                await services.agent_status_service.update_step(status_key, "draft_response", agent_id)
+
+            has_updated_status = False
+            current_run_text = ""
+            current_run_has_tools = False
+
+            async for event in agent.run_stream_events(
+                query,
                 message_history=message_history,
-                agent_id=agent_id,
-                status_key=status_key
+                deps=deps
             ):
-                yield chunk
+                event_type = type(event).__name__
+                
+                if event_type == "PartStartEvent":
+                    if hasattr(event, "part"):
+                        part_type = type(event.part).__name__
+                        if part_type == "TextPart":
+                            chunk = event.part.content
+                            current_run_text += chunk
+                            if not has_updated_status and status_key:
+                                await services.agent_status_service.update_step(status_key, "finalize_response", agent_id)
+                                has_updated_status = True
+                            yield {"type": "content", "delta": chunk}
+                        elif part_type == "ThinkingPart":
+                            yield {"type": "thought", "delta": event.part.content}
+                        elif part_type == "ToolCallPart":
+                            current_run_has_tools = True
+                            if current_run_text:
+                                yield {"type": "reset"}
+                                yield {"type": "thought", "delta": current_run_text}
+                                current_run_text = ""
+                                
+                elif event_type == "PartDeltaEvent":
+                    if hasattr(event, "delta"):
+                        delta_type = type(event.delta).__name__
+                        if delta_type == "TextPartDelta":
+                            chunk = event.delta.content_delta
+                            current_run_text += chunk
+                            if not has_updated_status and status_key:
+                                await services.agent_status_service.update_step(status_key, "finalize_response", agent_id)
+                                has_updated_status = True
+                            yield {"type": "content", "delta": chunk}
+                        elif delta_type == "ThinkingPartDelta":
+                            yield {"type": "thought", "delta": event.delta.content_delta}
+                        elif delta_type == "ToolCallPartDelta":
+                            current_run_has_tools = True
+                            if current_run_text:
+                                yield {"type": "reset"}
+                                yield {"type": "thought", "delta": current_run_text}
+                                current_run_text = ""
+                                
+                elif event_type == "FunctionToolCallEvent":
+                    current_run_has_tools = True
+                    if current_run_text:
+                        yield {"type": "reset"}
+                        yield {"type": "thought", "delta": current_run_text}
+                        current_run_text = ""
+                        
+                elif event_type == "ModelResponseStreamEvent":
+                    current_run_text = ""
+                    current_run_has_tools = False
+                    
+                elif event_type == "AgentRunResultEvent":
+                    yield {"type": "result", "result": event.result}
 
             if status_key:
                 await services.agent_status_service.finish_session(

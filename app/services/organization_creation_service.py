@@ -104,9 +104,15 @@ class OrganizationCreationService:
 
         # 1. Kita Assistant Tools
         kita_tools = []
-        search_mem_id = await get_tool_id("rag_search")
+        rag_search_id = await get_tool_id("rag_search")
+        if rag_search_id:
+            kita_tools.append(rag_search_id)
+        search_mem_id = await get_tool_id("search_memory")
         if search_mem_id:
             kita_tools.append(search_mem_id)
+        delegate_id = await get_tool_id("delegate_task")
+        if delegate_id:
+            kita_tools.append(delegate_id)
 
         # 2. Agent Creator Tools
         creator_tool_names = [
@@ -115,7 +121,8 @@ class OrganizationCreationService:
             "list_agents", 
             "update_agent", 
             "rag_search", 
-            "list_available_llms"
+            "list_available_llms",
+            "delegate_task"
         ]
         creator_tools = []
         for name in creator_tool_names:
