@@ -2,10 +2,12 @@ from pydantic_ai import FunctionToolset
 from pydantic_ai import RunContext
 from app.db import db, TenantCollection
 from app.services.llm_service import LlmService
+from app.utils.logger import log_tool_call
 
 llm_toolset = FunctionToolset()
 
 @llm_toolset.tool
+@log_tool_call
 async def list_available_llms(
     ctx: RunContext[dict]
 ) -> str:

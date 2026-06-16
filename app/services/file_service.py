@@ -1,11 +1,14 @@
 import os
 import uuid
+import logging
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone
 from supabase import create_client, Client
 from app.db import TenantCollection
 from app.models.file import FileDocument, FileUploadRequest, FileUploadResponse, FileResponse, FileStatus
 from app.services.event_service import IEventService
+
+logger = logging.getLogger(__name__)
 
 class FileService:
     def __init__(self, collection: TenantCollection, org_id: str, event_service: IEventService):
@@ -31,6 +34,11 @@ class FileService:
         extension = self._get_extension(req.filename)
         storage_path = f"{file_id}.{extension}" if extension else file_id
         
+        logger.info(
+            f"Initiating file upload: filename={req.filename}, size={req.size} bytes, file_id={file_id}",
+            extra={"filename": req.filename, "size": req.size, "file_id": file_id}
+        )
+
         # Create DB record
         file_doc = FileDocument(
             id=file_id,
@@ -101,6 +109,11 @@ class FileService:
         if not doc:
             return False
             
+        logger.info(
+            f"Deleting file: filename={doc.get('filename')}, file_id={file_id}",
+            extra={"filename": doc.get('filename'), "file_id": file_id}
+        )
+
         # Delete from DB
         self.collection.delete_one({"id": file_id})
         
@@ -112,7 +125,7 @@ class FileService:
         except Exception as e:
             # We log but continue, ensuring DB record is cleaned up 
             # even if storage is out of sync or file already gone.
-            print(f"Error deleting file from Supabase: {e}")
+            logger.error(f"Error deleting file from Supabase storage: {e}", exc_info=True)
             
         return True
 
@@ -147,6 +160,11 @@ class FileService:
         updated_doc = self.collection.find_one({"id": file_id})
         res = self._format_response(updated_doc)
         
+        logger.info(
+            f"Completed file upload: filename={res.filename}, file_id={res.id}",
+            extra={"filename": res.filename, "file_id": res.id}
+        )
+
         # Trigger event
         await self.event_service.push("file:completed", {
             "file_id": res.id,
@@ -174,6 +192,11 @@ class FileService:
         if not doc:
             raise ValueError(f"File {file_id} not found")
             
+        logger.info(
+            f"Downloading file: filename={doc.get('filename')}, file_id={file_id}",
+            extra={"filename": doc.get('filename'), "file_id": file_id}
+        )
+
         extension = doc.get("extension", "")
         storage_path = f"{file_id}.{extension}" if extension else file_id
         

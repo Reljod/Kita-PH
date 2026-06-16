@@ -1,11 +1,14 @@
 import asyncio
 import os
 import httpx
+import logging
 from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any, Protocol
 from bson import ObjectId
 from app.models.rag import RagCreateRequest, RagUpdateRequest, RagResponse, RagDocument
 from app.db import TenantCollection
+
+logger = logging.getLogger(__name__)
 
 EMBEDDING_MODEL = "perplexity/pplx-embed-v1-0.6b"
 RERANK_MODEL = "cohere/rerank-v3.5"
@@ -185,8 +188,9 @@ class MongoVectorDbRagService(IRagService):
             from app.services.rag_enrichment_service import RagEnrichmentService
             enricher = RagEnrichmentService(self.collection)
             await enricher.enrich_and_embed(rag_id)
+            logger.info(f"Successfully updated RAG embedding: rag_id={rag_id}", extra={"rag_id": rag_id})
         except Exception as e:
-            print(f"Error updating embedding for {rag_id}: {e}")
+            logger.error(f"Error updating embedding for rag_id={rag_id}: {e}", exc_info=True)
             try:
                 self.collection.update_one(
                     {"_id": ObjectId(rag_id)},
@@ -196,8 +200,16 @@ class MongoVectorDbRagService(IRagService):
                 pass
 
     async def search(self, query: str, limit: int = 5, agent_id: Optional[str] = None) -> List[RagResponse]:
+        import time
+        start_time = time.perf_counter()
+        truncated_query = query[:150] + "..." if len(query) > 150 else query
+
         # Embed the query via OpenRouter
-        query_embedding = await _create_embedding(query)
+        try:
+            query_embedding = await _create_embedding(query)
+        except Exception as e:
+            logger.error(f"Error creating query embedding: {e}", exc_info=True)
+            return []
 
         # Atlas Vector Search
         # Retrieve limit * 4 candidates for rerank
@@ -225,7 +237,7 @@ class MongoVectorDbRagService(IRagService):
             pipeline.append({"$set": {"search_score": {"$meta": "vectorSearchScore"}}})
             docs = list(self.collection.aggregate(pipeline))
         except Exception as e:
-            print(f"Error during vector search: {e}")
+            logger.error(f"Error during vector search: {e}", exc_info=True)
             docs = []
 
         # Fallback to keyword regex-based text search if vector index returned no results
@@ -249,6 +261,17 @@ class MongoVectorDbRagService(IRagService):
             docs = list(self.collection.find(query_filter).sort("updated_at", -1).limit(candidate_limit))
 
         if not docs:
+            duration = time.perf_counter() - start_time
+            logger.info(
+                f"RAG search completed: query={truncated_query}, results=0, duration={duration:.3f}s",
+                extra={
+                    "query": truncated_query,
+                    "limit": limit,
+                    "agent_id": agent_id,
+                    "results_count": 0,
+                    "duration": duration
+                }
+            )
             return []
 
         # Rerank candidates via OpenRouter cohere/rerank-v3.5
@@ -257,7 +280,7 @@ class MongoVectorDbRagService(IRagService):
         try:
             rerank_results = await _rerank(query, doc_texts, top_n=len(docs))
         except Exception as re_err:
-            print(f"Failed to rerank: {re_err}")
+            logger.error(f"Failed to rerank: {re_err}", exc_info=True)
 
         # Build an index→score map from rerank results
         rerank_score_map: dict[int, float] = {}
@@ -289,5 +312,17 @@ class MongoVectorDbRagService(IRagService):
         # Sort and take top limit
         docs.sort(key=lambda d: d.get("combined_score", 0.0), reverse=True)
         docs = docs[:limit]
+
+        duration = time.perf_counter() - start_time
+        logger.info(
+            f"RAG search completed: query={truncated_query}, results={len(docs)}, duration={duration:.3f}s",
+            extra={
+                "query": truncated_query,
+                "limit": limit,
+                "agent_id": agent_id,
+                "results_count": len(docs),
+                "duration": duration
+            }
+        )
 
         return [format_rag_response(d) for d in docs]

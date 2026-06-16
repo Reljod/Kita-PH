@@ -71,6 +71,7 @@ logfire.configure(
     )
 )
 logfire.instrument_pydantic_ai()
+logfire.instrument_openai()
 logfire.instrument_fastapi(app)
 
 # Initialize standard logging with custom LogFormatter

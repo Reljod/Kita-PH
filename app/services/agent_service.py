@@ -1,4 +1,5 @@
 import os
+import logging
 from bson import ObjectId
 import pymongo
 from typing import List, Optional, Protocol, Any, AsyncIterator
@@ -17,6 +18,7 @@ from app.services.tools.memory_tools import memory_toolset
 from app.services.tools.delegation_tools import delegation_toolset
 from app.services.tools import get_tools_by_names
 from app.db import TenantCollection
+logger = logging.getLogger(__name__)
 
 
 class IAgentService(Protocol):
@@ -372,37 +374,77 @@ class AgentService(IAgentService):
                 chat_id=chat_id
             )
 
-        try:
-            agent = self.get_runnable_agent(agent_id=agent_id)
-            deps = self._get_deps(agent_id, status_key=status_key)
+        import time
+        import logfire
+        start_time = time.perf_counter()
+        truncated_query = query[:150] + "..." if len(query) > 150 else query
 
-            if status_key:
-                await services.agent_status_service.update_step(status_key, "draft_response", agent_id)
+        with logfire.span("agent_run", agent_id=agent_id, query=truncated_query) as span:
+            try:
+                agent = self.get_runnable_agent(agent_id=agent_id)
+                deps = self._get_deps(agent_id, status_key=status_key)
 
-            result = await agent.run(
-                query,
-                message_history=message_history,
-                deps=deps
-            )
+                if status_key:
+                    await services.agent_status_service.update_step(status_key, "draft_response", agent_id)
 
-            if status_key:
-                await services.agent_status_service.update_step(status_key, "finalize_response", agent_id)
-
-            if status_key:
-                await services.agent_status_service.finish_session(
-                    status_key=status_key,
-                    success=True,
-                    chat_id=chat_id
+                result = await agent.run(
+                    query,
+                    message_history=message_history,
+                    deps=deps
                 )
-            return result
-        except Exception as e:
-            if status_key:
-                await services.agent_status_service.finish_session(
-                    status_key=status_key,
-                    success=False,
-                    chat_id=chat_id
+
+                duration = time.perf_counter() - start_time
+                usage = result.usage()
+                span.set_attribute("duration_seconds", duration)
+                span.set_attribute("request_tokens", usage.request_tokens)
+                span.set_attribute("response_tokens", usage.response_tokens)
+                span.set_attribute("total_tokens", usage.total_tokens)
+                span.set_attribute("requests", usage.requests)
+
+                logger.info(
+                    f"Agent run completed: agent_id={agent_id}, duration={duration:.3f}s, tokens={usage.total_tokens}",
+                    extra={
+                        "agent_id": agent_id,
+                        "duration": duration,
+                        "query": truncated_query,
+                        "request_tokens": usage.request_tokens,
+                        "response_tokens": usage.response_tokens,
+                        "total_tokens": usage.total_tokens,
+                        "requests": usage.requests,
+                    }
                 )
-            raise e
+
+                if status_key:
+                    await services.agent_status_service.update_step(status_key, "finalize_response", agent_id)
+
+                if status_key:
+                    await services.agent_status_service.finish_session(
+                        status_key=status_key,
+                        success=True,
+                        chat_id=chat_id
+                    )
+                return result
+            except Exception as e:
+                duration = time.perf_counter() - start_time
+                span.set_attribute("duration_seconds", duration)
+                span.set_attribute("error", str(e))
+                logger.error(
+                    f"Agent run failed: agent_id={agent_id}, duration={duration:.3f}s: {e}",
+                    extra={
+                        "agent_id": agent_id,
+                        "duration": duration,
+                        "query": truncated_query,
+                        "error": str(e),
+                    },
+                    exc_info=True
+                )
+                if status_key:
+                    await services.agent_status_service.finish_session(
+                        status_key=status_key,
+                        success=False,
+                        chat_id=chat_id
+                    )
+                raise e
 
     async def run_stream(
         self,
@@ -422,89 +464,129 @@ class AgentService(IAgentService):
                 chat_id=chat_id
             )
 
-        try:
-            agent = self.get_runnable_agent(agent_id=agent_id)
-            deps = self._get_deps(agent_id, status_key=status_key)
+        import time
+        import logfire
+        start_time = time.perf_counter()
+        truncated_query = query[:150] + "..." if len(query) > 150 else query
 
-            if status_key:
-                await services.agent_status_service.update_step(status_key, "draft_response", agent_id)
+        with logfire.span("agent_run_stream", agent_id=agent_id, query=truncated_query) as span:
+            try:
+                agent = self.get_runnable_agent(agent_id=agent_id)
+                deps = self._get_deps(agent_id, status_key=status_key)
 
-            has_updated_status = False
-            current_run_text = ""
-            current_run_has_tools = False
+                if status_key:
+                    await services.agent_status_service.update_step(status_key, "draft_response", agent_id)
 
-            async for event in agent.run_stream_events(
-                query,
-                message_history=message_history,
-                deps=deps
-            ):
-                event_type = type(event).__name__
-                
-                if event_type == "PartStartEvent":
-                    if hasattr(event, "part"):
-                        part_type = type(event.part).__name__
-                        if part_type == "TextPart":
-                            chunk = event.part.content
-                            current_run_text += chunk
-                            if not has_updated_status and status_key:
-                                await services.agent_status_service.update_step(status_key, "finalize_response", agent_id)
-                                has_updated_status = True
-                            yield {"type": "content", "delta": chunk}
-                        elif part_type == "ThinkingPart":
-                            yield {"type": "thought", "delta": event.part.content}
-                        elif part_type == "ToolCallPart":
-                            current_run_has_tools = True
-                            if current_run_text:
-                                yield {"type": "reset"}
-                                yield {"type": "thought", "delta": current_run_text}
-                                current_run_text = ""
-                                
-                elif event_type == "PartDeltaEvent":
-                    if hasattr(event, "delta"):
-                        delta_type = type(event.delta).__name__
-                        if delta_type == "TextPartDelta":
-                            chunk = event.delta.content_delta
-                            current_run_text += chunk
-                            if not has_updated_status and status_key:
-                                await services.agent_status_service.update_step(status_key, "finalize_response", agent_id)
-                                has_updated_status = True
-                            yield {"type": "content", "delta": chunk}
-                        elif delta_type == "ThinkingPartDelta":
-                            yield {"type": "thought", "delta": event.delta.content_delta}
-                        elif delta_type == "ToolCallPartDelta":
-                            current_run_has_tools = True
-                            if current_run_text:
-                                yield {"type": "reset"}
-                                yield {"type": "thought", "delta": current_run_text}
-                                current_run_text = ""
-                                
-                elif event_type == "FunctionToolCallEvent":
-                    current_run_has_tools = True
-                    if current_run_text:
-                        yield {"type": "reset"}
-                        yield {"type": "thought", "delta": current_run_text}
-                        current_run_text = ""
-                        
-                elif event_type == "ModelResponseStreamEvent":
-                    current_run_text = ""
-                    current_run_has_tools = False
+                has_updated_status = False
+                current_run_text = ""
+                current_run_has_tools = False
+
+                async for event in agent.run_stream_events(
+                    query,
+                    message_history=message_history,
+                    deps=deps
+                ):
+                    event_type = type(event).__name__
                     
-                elif event_type == "AgentRunResultEvent":
-                    yield {"type": "result", "result": event.result}
+                    if event_type == "PartStartEvent":
+                        if hasattr(event, "part"):
+                            part_type = type(event.part).__name__
+                            if part_type == "TextPart":
+                                chunk = event.part.content
+                                current_run_text += chunk
+                                if not has_updated_status and status_key:
+                                    await services.agent_status_service.update_step(status_key, "finalize_response", agent_id)
+                                    has_updated_status = True
+                                yield {"type": "content", "delta": chunk}
+                            elif part_type == "ThinkingPart":
+                                yield {"type": "thought", "delta": event.part.content}
+                            elif part_type == "ToolCallPart":
+                                current_run_has_tools = True
+                                if current_run_text:
+                                    yield {"type": "reset"}
+                                    yield {"type": "thought", "delta": current_run_text}
+                                    current_run_text = ""
+                                    
+                    elif event_type == "PartDeltaEvent":
+                        if hasattr(event, "delta"):
+                            delta_type = type(event.delta).__name__
+                            if delta_type == "TextPartDelta":
+                                chunk = event.delta.content_delta
+                                current_run_text += chunk
+                                if not has_updated_status and status_key:
+                                    await services.agent_status_service.update_step(status_key, "finalize_response", agent_id)
+                                    has_updated_status = True
+                                yield {"type": "content", "delta": chunk}
+                            elif delta_type == "ThinkingPartDelta":
+                                yield {"type": "thought", "delta": event.delta.content_delta}
+                            elif delta_type == "ToolCallPartDelta":
+                                current_run_has_tools = True
+                                if current_run_text:
+                                    yield {"type": "reset"}
+                                    yield {"type": "thought", "delta": current_run_text}
+                                    current_run_text = ""
+                                    
+                    elif event_type == "FunctionToolCallEvent":
+                        current_run_has_tools = True
+                        if current_run_text:
+                            yield {"type": "reset"}
+                            yield {"type": "thought", "delta": current_run_text}
+                            current_run_text = ""
+                            
+                    elif event_type == "ModelResponseStreamEvent":
+                        current_run_text = ""
+                        current_run_has_tools = False
+                        
+                    elif event_type == "AgentRunResultEvent":
+                        duration = time.perf_counter() - start_time
+                        result = event.result
+                        usage = result.usage()
+                        span.set_attribute("duration_seconds", duration)
+                        span.set_attribute("request_tokens", usage.request_tokens)
+                        span.set_attribute("response_tokens", usage.response_tokens)
+                        span.set_attribute("total_tokens", usage.total_tokens)
+                        span.set_attribute("requests", usage.requests)
 
-            if status_key:
-                await services.agent_status_service.finish_session(
-                    status_key=status_key,
-                    success=True,
-                    chat_id=chat_id
+                        logger.info(
+                            f"Agent run stream completed: agent_id={agent_id}, duration={duration:.3f}s, tokens={usage.total_tokens}",
+                            extra={
+                                "agent_id": agent_id,
+                                "duration": duration,
+                                "query": truncated_query,
+                                "request_tokens": usage.request_tokens,
+                                "response_tokens": usage.response_tokens,
+                                "total_tokens": usage.total_tokens,
+                                "requests": usage.requests,
+                            }
+                        )
+                        yield {"type": "result", "result": event.result}
+
+                if status_key:
+                    await services.agent_status_service.finish_session(
+                        status_key=status_key,
+                        success=True,
+                        chat_id=chat_id
+                    )
+            except Exception as e:
+                duration = time.perf_counter() - start_time
+                span.set_attribute("duration_seconds", duration)
+                span.set_attribute("error", str(e))
+                logger.error(
+                    f"Agent run stream failed: agent_id={agent_id}, duration={duration:.3f}s: {e}",
+                    extra={
+                        "agent_id": agent_id,
+                        "duration": duration,
+                        "query": truncated_query,
+                        "error": str(e),
+                    },
+                    exc_info=True
                 )
-        except Exception as e:
-            if status_key:
-                await services.agent_status_service.finish_session(
-                    status_key=status_key,
-                    success=False,
-                    chat_id=chat_id
-                )
-            raise e
+                if status_key:
+                    await services.agent_status_service.finish_session(
+                        status_key=status_key,
+                        success=False,
+                        chat_id=chat_id
+                    )
+                raise e
 
 

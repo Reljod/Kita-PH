@@ -7,6 +7,86 @@ from datetime import datetime, timezone
 from typing import Optional, Tuple
 from fastapi import Header
 
+logger = logging.getLogger("app.api")
+
+STANDARD_RECORD_ATTRS = {
+    'name', 'msg', 'args', 'levelname', 'levelno', 'pathname', 'filename',
+    'module', 'exc_info', 'exc_text', 'stack_info', 'lineno', 'funcName',
+    'created', 'msecs', 'relativeCreated', 'thread', 'threadName',
+    'processName', 'process', 'message', 'org_id', 'user_id', 'request_id',
+    'trace_id', 'client_id'
+}
+
+def log_tool_call(func):
+    """
+    Decorator that instruments any agent tool function with a Logfire span
+    and standard logger statements to track input parameters, results, and duration.
+    """
+    import functools
+    import logfire
+    import time
+    from pydantic_ai import RunContext
+
+    @functools.wraps(func)
+    async def wrapper(*args, **kwargs):
+        tool_name = func.__name__
+        
+        # Filter inputs to exclude RunContext
+        filtered_args = [a for a in args if not isinstance(a, RunContext)]
+        filtered_kwargs = {k: v for k, v in kwargs.items() if not isinstance(v, RunContext)}
+        
+        inputs_str = f"args={filtered_args}, kwargs={filtered_kwargs}"
+        truncated_inputs = inputs_str[:250] + "..." if len(inputs_str) > 250 else inputs_str
+        
+        start_time = time.perf_counter()
+        
+        with logfire.span(f"tool_call:{tool_name}", tool_name=tool_name, inputs=truncated_inputs) as span:
+            logger.info(
+                f"Starting tool call: {tool_name} with {truncated_inputs}",
+                extra={
+                    "tool_name": tool_name,
+                    "inputs": truncated_inputs,
+                }
+            )
+            try:
+                result = await func(*args, **kwargs)
+                duration = time.perf_counter() - start_time
+                
+                result_str = str(result)
+                truncated_result = result_str[:250] + "..." if len(result_str) > 250 else result_str
+                
+                span.set_attribute("duration_seconds", duration)
+                span.set_attribute("status", "success")
+                
+                logger.info(
+                    f"Tool call {tool_name} completed in {duration:.3f}s",
+                    extra={
+                        "tool_name": tool_name,
+                        "duration": duration,
+                        "status": "success",
+                        "result": truncated_result,
+                    }
+                )
+                return result
+            except Exception as e:
+                duration = time.perf_counter() - start_time
+                span.set_attribute("duration_seconds", duration)
+                span.set_attribute("status", "failed")
+                span.set_attribute("error", str(e))
+                
+                logger.error(
+                    f"Tool call {tool_name} failed in {duration:.3f}s: {str(e)}",
+                    extra={
+                        "tool_name": tool_name,
+                        "duration": duration,
+                        "status": "failed",
+                        "error": str(e),
+                    },
+                    exc_info=True
+                )
+                raise e
+    return wrapper
+
 # Define ContextVars for storing request-scoped tracing and authentication context
 ctx_org_id: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("org_id", default=None)
 ctx_user_id: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("user_id", default=None)
@@ -99,6 +179,12 @@ class LogFormatter(logging.Formatter):
         trace_id = getattr(record, "trace_id", "-")
         client_id = getattr(record, "client_id", "-")
 
+        # Extract extra custom attributes
+        extras = {
+            k: v for k, v in record.__dict__.items()
+            if k not in STANDARD_RECORD_ATTRS
+        }
+
         if self.use_json:
             log_data = {
                 "timestamp": datetime.fromtimestamp(record.created, timezone.utc).isoformat(),
@@ -117,6 +203,9 @@ class LogFormatter(logging.Formatter):
                 log_data["error"] = str(record.error)
             else:
                 log_data["error"] = None
+            
+            # Merge extra keys
+            log_data.update(extras)
                 
             return json.dumps(log_data)
         else:
@@ -124,7 +213,12 @@ class LogFormatter(logging.Formatter):
             exc_str = ""
             if record.exc_info:
                 exc_str = f"\n{self.formatException(record.exc_info)}"
-            return f"{timestamp} [{record.levelname}] {record.name}: {record.getMessage()}{exc_str}"
+            
+            extra_str = ""
+            if extras:
+                extra_str = " [" + " ".join(f"{k}={v}" for k, v in extras.items()) + "]"
+                
+            return f"{timestamp} [{record.levelname}] {record.name}: {record.getMessage()}{extra_str}{exc_str}"
 
 def setup_logging():
     """Configures root logging with custom LogFormatter, handling Logfire integration if configured."""
@@ -188,6 +282,8 @@ class CorrelationIdMiddleware:
             await self.app(scope, receive, send)
             return
 
+        import time
+
         # Parse headers from ASGI scope (names are lowercase bytes)
         headers = {k.lower(): v for k, v in scope.get("headers", [])}
         
@@ -215,8 +311,12 @@ class CorrelationIdMiddleware:
             if client_id:
                 current_span.set_attribute("client_id", client_id)
 
+        start_time = time.perf_counter()
+        status_code = [200]
+
         async def send_wrapper(message):
             if message["type"] == "http.response.start":
+                status_code[0] = message.get("status", 200)
                 response_headers = message.setdefault("headers", [])
                 response_headers.append((b"x-request-id", req_id.encode("latin1")))
                 response_headers.append((b"x-trace-id", tr_id.encode("latin1")))
@@ -225,6 +325,29 @@ class CorrelationIdMiddleware:
         try:
             await self.app(scope, receive, send_wrapper)
         finally:
+            duration = time.perf_counter() - start_time
+            method = scope.get("method", "")
+            path = scope.get("path", "")
+            
+            if scope["type"] == "http":
+                logger.info(
+                    f"HTTP Request: {method} {path} -> {status_code[0]} in {duration:.3f}s",
+                    extra={
+                        "http_method": method,
+                        "http_path": path,
+                        "status_code": status_code[0],
+                        "duration": duration,
+                    }
+                )
+            else:
+                logger.info(
+                    f"WebSocket session completed: {path} in {duration:.3f}s",
+                    extra={
+                        "http_path": path,
+                        "duration": duration,
+                    }
+                )
+
             ctx_request_id.reset(token_req)
             ctx_trace_id.reset(token_trace)
             ctx_client_id.reset(token_client)

@@ -1,9 +1,12 @@
 import os
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 from jose import JWTError, jwt
 from app.models.auth import Token, TokenData, TokenDocument
 from app.db import db
+
+logger = logging.getLogger(__name__)
 
 SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key")
 ALGORITHM = "HS256"
@@ -34,6 +37,7 @@ class AuthService:
             user_id: str = payload.get("sub")
             org_id: str = payload.get("org_id")
             if user_id is None:
+                logger.warning("Token verification failed: sub (user_id) missing in payload")
                 return None
             
             # Check if token is revoked in database
@@ -45,10 +49,12 @@ class AuthService:
                 "is_revoked": False
             })
             if not token_doc:
+                logger.warning(f"Token verification failed: token is revoked or not found in db (user_id: {user_id})")
                 return None
 
             return TokenData(user_id=user_id, org_id=org_id)
-        except JWTError:
+        except JWTError as e:
+            logger.warning(f"Token verification failed: JWTError {e}")
             return None
 
     def generate_tokens(self, user_id: str, org_id: Optional[str] = None) -> Token:
@@ -73,6 +79,11 @@ class AuthService:
         )
         db.get_tokens_collection().insert_one(token_doc.dict())
 
+        logger.info(
+            f"Successfully generated token pair: user_id={user_id}, org_id={org_id}",
+            extra={"user_id": user_id, "org_id": org_id}
+        )
+
         return Token(
             access_token=access_token,
             refresh_token=refresh_token,
@@ -80,18 +91,21 @@ class AuthService:
         )
 
     def revoke_token(self, token: str):
+        logger.info("Revoking auth token")
         db.get_tokens_collection().update_many(
             {"$or": [{"access_token": token}, {"refresh_token": token}]},
             {"$set": {"is_revoked": True}}
         )
 
     def revoke_user_tokens(self, user_id: str):
+        logger.info(f"Revoking all tokens for user_id={user_id}", extra={"user_id": user_id})
         db.get_tokens_collection().update_many(
             {"user_id": user_id},
             {"$set": {"is_revoked": True}}
         )
 
     def revoke_token_pair(self, access_token: str, refresh_token: str):
+        logger.info("Revoking token pair")
         db.get_tokens_collection().update_one(
             {"access_token": access_token, "refresh_token": refresh_token},
             {"$set": {"is_revoked": True}}

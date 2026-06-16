@@ -6,6 +6,7 @@ from typing import Annotated, Dict, Any, List, Optional
 from datetime import datetime, timezone
 
 from app.models.graph_rag import GraphDocument, GraphChunk, GraphEntity, GraphRelationship
+from app.utils.logger import log_tool_call
 
 graph_rag_toolset = FunctionToolset()
 
@@ -31,6 +32,7 @@ class RelationshipInput(BaseModel):
     properties: Annotated[List[PropertyInput], Field(default_factory=list, description="Additional metadata for the relationship")]
 
 @graph_rag_toolset.tool
+@log_tool_call
 async def ingest_into_graph(
     ctx: RunContext[dict],
     file_id: Annotated[str, Field(description="The unique file ID")],

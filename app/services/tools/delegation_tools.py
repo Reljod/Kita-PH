@@ -1,10 +1,12 @@
 from pydantic_ai import FunctionToolset, RunContext
 from pydantic import Field
 from typing import Optional, Annotated
+from app.utils.logger import log_tool_call
 
 delegation_toolset = FunctionToolset()
 
 @delegation_toolset.tool
+@log_tool_call
 async def delegate_task(
     ctx: RunContext[dict],
     task_description: Annotated[str, Field(description="The precise task or research query to delegate to the sub-agent.")],

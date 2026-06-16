@@ -1,10 +1,12 @@
 from pydantic_ai import FunctionToolset, RunContext
 from pydantic import Field
 from typing import Annotated, Optional, List
+from app.utils.logger import log_tool_call
 
 agent_toolset = FunctionToolset()
 
 @agent_toolset.tool
+@log_tool_call
 async def get_available_agents(
     ctx: RunContext[dict]
 ) -> List[dict]:

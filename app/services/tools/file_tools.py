@@ -1,10 +1,12 @@
 from pydantic_ai import FunctionToolset, RunContext
 from pydantic import Field
 from typing import Annotated, Optional
+from app.utils.logger import log_tool_call
 
 file_toolset = FunctionToolset()
 
 @file_toolset.tool
+@log_tool_call
 async def resolve_file_id(
     ctx: RunContext[dict],
     file_path: Annotated[str, Field(description="The file path in format {id}.{extension}")]
