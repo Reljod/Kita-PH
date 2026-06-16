@@ -26,9 +26,13 @@ async def get_token_data(
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
+    from app.utils.logger import set_logging_context
     token_data = auth_service.verify_token(token)
     if token_data is None:
         raise credentials_exception
+    
+    # Propagate user_id and org_id to the request-scoped logging contextvars
+    set_logging_context(user_id=token_data.user_id, org_id=token_data.org_id)
     return token_data
 
 async def get_current_user(

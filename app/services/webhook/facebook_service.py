@@ -1,6 +1,7 @@
 import os
 import hmac
 import hashlib
+import logging
 from typing import Any, Dict
 from fastapi import HTTPException
 
@@ -10,6 +11,9 @@ from app.services.agent_service import AgentService
 from app.services.llm_service import LlmService
 from app.db import db, TenantCollection
 from app.models.chat import ChatCreateRequest
+from app.utils.logger import set_logging_context
+
+logger = logging.getLogger(__name__)
 
 class FacebookService:
     def __init__(self):
@@ -58,7 +62,7 @@ class FacebookService:
             raise HTTPException(status_code=404)
 
     async def _handle_message(self, event: Dict[str, Any]) -> None:
-        print("Event: ", event)
+        logger.info(f"Processing message event: {event}")
         sender_id = event.get("sender", {}).get("id")
         recipient_id = event.get("recipient", {}).get("id")
         message = event.get("message")
@@ -75,16 +79,19 @@ class FacebookService:
         if not message_text:
             return
 
-        print(f"Received message from facebook user {sender_id} to page {recipient_id}: {message_text}")
+        logger.info(f"Received message from Facebook user {sender_id} to page {recipient_id}: {message_text}")
         
         org_service = OrganizationService()
         org = org_service.get_org_by_integration_id("facebook_page_id", recipient_id)
         if not org:
-            print(f"No organization mapping found for Facebook Page ID: {sender_id}")
+            logger.warning(f"No organization mapping found for Facebook Page ID: {recipient_id}")
             return
             
         org_id = org.id
-        print(f"Mapped facebook page {sender_id} to org_id: {org_id}")
+        # Set resolved logging context parameters
+        set_logging_context(org_id=org_id, user_id=sender_id)
+        
+        logger.info(f"Mapped facebook page {recipient_id} to org_id: {org_id}")
         
         llm_service_coll = TenantCollection(db.get_llms_collection(), org_id)
         llm_service = LlmService(llm_service_coll)
@@ -96,16 +103,16 @@ class FacebookService:
         
         req = ChatCreateRequest(message=message_text)
         try:
-            print(f"Message text: {message_text}")
+            logger.info(f"Processing chat message text: {message_text}")
             # res = await chat_service.create_chat(req)
-            print(f"Successfully processed webhook message and created chat for org {org_id}.")
+            logger.info(f"Successfully processed webhook message and created chat for org {org_id}.")
             # Further logic to send the response back to facebook can be added here
         except Exception as e:
-            print(f"Error handling facebook webhook message for org {org_id}: {e}")
+            logger.error(f"Error handling facebook webhook message for org {org_id}: {e}", exc_info=True)
 
     async def _handle_postback(self, event: Dict[str, Any]) -> None:
         sender_id = event.get("sender", {}).get("id")
         recipient_id = event.get("recipient", {}).get("id")
         payload = event.get("postback", {}).get("payload")
-        print(f"Received postback from {sender_id}: {payload}")
+        logger.info(f"Received postback from {sender_id}: {payload}")
         # TODO: Implement postback handling logic

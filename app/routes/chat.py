@@ -1,4 +1,5 @@
 import json
+import logging
 from fastapi import APIRouter, HTTPException, Depends, Header, WebSocket, WebSocketDisconnect, Query
 from fastapi.responses import StreamingResponse
 from typing import List, Optional
@@ -7,6 +8,8 @@ from app.services.chat_service import IChatService
 from app.dependencies import get_chat_service
 from app.security import require_org_membership
 from app.services.auth_service import AuthService
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/chat", tags=["Chat"])
 
@@ -17,11 +20,13 @@ async def create_chat(
     x_agent_id: Optional[str] = Header(None, alias="x-agent-id"),
     x_status_key: Optional[str] = Header(None, alias="x-status-key")
 ):
+    logger.info("Initializing new chat stream")
     async def event_generator():
         try:
             async for event in chat_service.create_chat_stream(req, agent_id=x_agent_id, status_key=x_status_key):
                 yield f"data: {json.dumps(event)}\n\n"
         except Exception as e:
+            logger.error(f"Error in chat stream: {e}", exc_info=True)
             err_data = {"type": "error", "message": str(e)}
             yield f"data: {json.dumps(err_data)}\n\n"
 
@@ -35,11 +40,13 @@ async def continue_chat(
     x_agent_id: Optional[str] = Header(None, alias="x-agent-id"),
     x_status_key: Optional[str] = Header(None, alias="x-status-key")
 ):
+    logger.info(f"Continuing chat stream for chat_id: {chat_id}")
     async def event_generator():
         try:
             async for event in chat_service.continue_chat_stream(chat_id, req, agent_id=x_agent_id, status_key=x_status_key):
                 yield f"data: {json.dumps(event)}\n\n"
         except Exception as e:
+            logger.error(f"Error in continue chat stream for chat_id {chat_id}: {e}", exc_info=True)
             err_data = {"type": "error", "message": str(e)}
             yield f"data: {json.dumps(err_data)}\n\n"
 
@@ -94,6 +101,18 @@ async def status_websocket(
         return
 
     org_id = token_data.org_id
+    user_id = token_data.user_id
+    
+    # WebSocket handshake is outside standard HTTP middleware context, set logging parameters manually
+    from app.utils.logger import set_logging_context
+    set_logging_context(
+        org_id=org_id,
+        user_id=user_id,
+        request_id=f"ws-{status_key}",
+        trace_id=f"ws-{status_key}"
+    )
+
+    logger.info(f"WebSocket status connection accepted for key: {status_key}")
     await websocket.accept()
 
     from app.dependencies.services import get_services
@@ -119,13 +138,12 @@ async def status_websocket(
                     if data.get("status") in ["completed", "failed"]:
                         break
         except WebSocketDisconnect:
-            pass
+            logger.info(f"WebSocket client disconnected for key: {status_key}")
         finally:
             await pubsub.unsubscribe(channel)
             await pubsub.close()
     except Exception as e:
-        import logfire
-        logfire.error("WebSocket status trace failed: {error}", error=str(e))
+        logger.error(f"WebSocket status trace failed for key {status_key}: {e}", exc_info=True)
     finally:
         try:
             await websocket.close()
