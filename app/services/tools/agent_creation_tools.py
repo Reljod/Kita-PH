@@ -4,10 +4,12 @@ from typing import List, Optional, Annotated
 from pydantic_ai import RunContext
 from app.db import db, TenantCollection
 from app.models.agent import AgentDocument, format_agent_response
+from app.utils.logger import log_tool_call
 
 creator_toolset = FunctionToolset()
 
 @creator_toolset.tool
+@log_tool_call
 async def create_agent(
     ctx: RunContext[dict],
     name: Annotated[str, Field(description="The name of the new agent.")],
@@ -63,6 +65,7 @@ async def create_agent(
     return f"Successfully created agent '{name}' with ID: {agent.id}"
 
 @creator_toolset.tool
+@log_tool_call
 async def get_agent(
     ctx: RunContext[dict],
     agent_id: Annotated[str, Field(description="The ID of the agent to get (e.g., '67bc...-v1' or '67bc...')")]
@@ -107,6 +110,7 @@ async def get_agent(
     )
 
 @creator_toolset.tool
+@log_tool_call
 async def list_agents(
     ctx: RunContext[dict]
 ) -> str:
@@ -134,6 +138,7 @@ async def list_agents(
     return result
 
 @creator_toolset.tool
+@log_tool_call
 async def update_agent(
     ctx: RunContext[dict],
     agent_id: Annotated[str, Field(description="The ID of the agent to update.")],

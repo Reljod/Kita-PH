@@ -10,28 +10,28 @@ def parse_agent_id(agent_id_str: str) -> tuple[str, Optional[int]]:
     return agent_id_str, None
 
 class AgentCreateRequest(BaseModel):
-    name: str
-    role: str
-    goal: str
-    backstory: str
-    llm_id: str
-    personalities: Optional[List[str]] = None
-    tools: Optional[List[str]] = Field(default_factory=list)
+    name: str = Field(..., min_length=1, max_length=100)
+    role: str = Field(..., min_length=1, max_length=200)
+    goal: str = Field(..., min_length=1, max_length=1000)
+    backstory: str = Field(..., min_length=1, max_length=2000)
+    llm_id: str = Field(..., min_length=1, max_length=100)
+    personalities: Optional[List[str]] = Field(None, max_length=50)
+    tools: Optional[List[str]] = Field(default_factory=list, max_length=50)
 
 class AgentUpdateRequest(BaseModel):
-    name: Optional[str] = None
-    role: Optional[str] = None
-    goal: Optional[str] = None
-    backstory: Optional[str] = None
-    llm_id: Optional[str] = None
-    personalities: Optional[List[str]] = None
-    tools: Optional[List[str]] = None
+    name: Optional[str] = Field(None, min_length=1, max_length=100)
+    role: Optional[str] = Field(None, min_length=1, max_length=200)
+    goal: Optional[str] = Field(None, min_length=1, max_length=1000)
+    backstory: Optional[str] = Field(None, min_length=1, max_length=2000)
+    llm_id: Optional[str] = Field(None, min_length=1, max_length=100)
+    personalities: Optional[List[str]] = Field(None, max_length=50)
+    tools: Optional[List[str]] = Field(None, max_length=50)
 
 class AddToolsRequest(BaseModel):
-    tool_ids: List[str]
+    tool_ids: List[str] = Field(..., min_length=1, max_length=50)
 
 class RemoveToolsRequest(BaseModel):
-    tool_ids: List[str]
+    tool_ids: List[str] = Field(..., min_length=1, max_length=50)
 
 class AgentResponse(BaseModel):
     id: str

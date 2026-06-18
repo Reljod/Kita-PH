@@ -6,12 +6,14 @@ from typing import Annotated, List, Optional, Dict, Any
 from app.services.rag_service import MongoVectorDbRagService
 from pydantic_ai import RunContext
 from app.db import db, TenantCollection
+from app.utils.logger import log_tool_call
 
 logger = logging.getLogger(__name__)
 
 memory_toolset = FunctionToolset()
 
 @memory_toolset.tool
+@log_tool_call
 async def search_memory(
     ctx: RunContext[dict],
     query: Annotated[str, Field(description="The search query to find relevant information in the memory.")],
@@ -57,6 +59,7 @@ async def search_memory(
     return "\n\n".join(formatted_results)
 
 @memory_toolset.tool
+@log_tool_call
 async def rag_search(
     ctx: RunContext[dict],
     query: Annotated[str, Field(description="The search query to find relevant information in the memory using hybrid vector and keyword text search.")],

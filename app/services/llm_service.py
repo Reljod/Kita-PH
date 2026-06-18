@@ -1,8 +1,11 @@
 import os
+import logging
 from bson import ObjectId
 from typing import List, Optional, Dict, Any, Protocol
 from openai import AsyncOpenAI
 import logfire
+
+logger = logging.getLogger(__name__)
 
 from app.models.llm import LlmCreateRequest, LlmResponse, LlmDocument
 from app.db import TenantCollection
@@ -104,6 +107,11 @@ class LlmService(ILlmService):
             except Exception as e:
                 logfire.error("Failed to update status step in LLM run: {error}", error=str(e))
 
+        import time
+        start_time = time.perf_counter()
+        prompt_preview = str(messages[-1].get("content") if messages else "")
+        truncated_prompt = prompt_preview[:150] + "..." if len(prompt_preview) > 150 else prompt_preview
+
         response_format = {"type": "json_object"} if json_mode else None
         try:
             chat_completion = await self.client.chat.completions.create(
@@ -113,8 +121,36 @@ class LlmService(ILlmService):
                 temperature=temperature,
                 max_tokens=max_tokens
             )
+            duration = time.perf_counter() - start_time
+            usage = getattr(chat_completion, "usage", None)
+            prompt_tokens = usage.prompt_tokens if usage else 0
+            completion_tokens = usage.completion_tokens if usage else 0
+            total_tokens = usage.total_tokens if usage else 0
+
+            logger.info(
+                f"LLM call completed: model={model_name}, duration={duration:.3f}s, tokens={total_tokens}",
+                extra={
+                    "model": model_name,
+                    "prompt": truncated_prompt,
+                    "duration": duration,
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "total_tokens": total_tokens,
+                    "temperature": temperature,
+                }
+            )
             return chat_completion.choices[0].message.content.strip()
         except Exception as e:
-            logfire.error("LLM execution failed: {error}", error=str(e))
+            duration = time.perf_counter() - start_time
+            logger.error(
+                f"LLM call failed: model={model_name}, duration={duration:.3f}s: {e}",
+                extra={
+                    "model": model_name,
+                    "prompt": truncated_prompt,
+                    "duration": duration,
+                    "error": str(e)
+                },
+                exc_info=True
+            )
             raise e
 

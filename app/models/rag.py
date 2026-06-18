@@ -3,13 +3,13 @@ from typing import List, Optional, Any
 from datetime import datetime, timezone
 
 class RagCreateRequest(BaseModel):
-    title: str
-    content: str
-    agent_id: Optional[str] = None
+    title: str = Field(..., min_length=1, max_length=200)
+    content: str = Field(..., min_length=1, max_length=50000)
+    agent_id: Optional[str] = Field(None, max_length=100)
 
 class RagUpdateRequest(BaseModel):
-    title: Optional[str] = None
-    content: Optional[str] = None
+    title: Optional[str] = Field(None, min_length=1, max_length=200)
+    content: Optional[str] = Field(None, min_length=1, max_length=50000)
 
 class RagResponse(BaseModel):
     id: str

@@ -5,6 +5,7 @@ from app.services.user_service import UserService
 from app.services.organization_service import OrganizationService
 from app.models.user import UserResponse
 from app.models.auth import TokenData
+from app.exceptions import AuthSessionExpiredError
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
 
@@ -21,14 +22,13 @@ async def get_token_data(
     token: str = Depends(oauth2_scheme),
     auth_service: AuthService = Depends(get_auth_service)
 ) -> TokenData:
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
+    from app.utils.logger import set_logging_context
     token_data = auth_service.verify_token(token)
     if token_data is None:
-        raise credentials_exception
+        raise AuthSessionExpiredError("Your session has expired or is invalid. Please log in again.")
+    
+    # Propagate user_id and org_id to the request-scoped logging contextvars
+    set_logging_context(user_id=token_data.user_id, org_id=token_data.org_id)
     return token_data
 
 async def get_current_user(

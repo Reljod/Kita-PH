@@ -1,10 +1,12 @@
 from pydantic_ai import FunctionToolset, RunContext
 from pydantic import Field
 from typing import Annotated, Dict, Any, List, Optional
+from app.utils.logger import log_tool_call
 
 parse_toolset = FunctionToolset()
 
 @parse_toolset.tool
+@log_tool_call
 async def fetch_latest_parse(
     ctx: RunContext[dict],
     file_id: Annotated[str, Field(description="The unique file ID")]

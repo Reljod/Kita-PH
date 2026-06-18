@@ -10,20 +10,20 @@ class FileStatus(str, Enum):
     FAILED = "failed"
 
 class FileUploadRequest(BaseModel):
-    filename: str
-    size: int
-    content_type: Optional[str] = None
-    agent_id: Optional[str] = None
+    filename: str = Field(..., min_length=1, max_length=255)
+    size: int = Field(..., gt=0, le=52428800)  # Size in bytes (max 51,200 KB / 50MB)
+    content_type: Optional[str] = Field(None, max_length=100)
+    agent_id: Optional[str] = Field(None, max_length=100)
     metadata: Optional[Dict[str, Any]] = None
 
 class FileUpdateRequest(BaseModel):
-    filename: Optional[str] = None
-    agent_id: Optional[str] = None
+    filename: Optional[str] = Field(None, min_length=1, max_length=255)
+    agent_id: Optional[str] = Field(None, max_length=100)
     metadata: Optional[Dict[str, Any]] = None
     status: Optional[FileStatus] = None
 
 class BatchFileCompleteRequest(BaseModel):
-    file_ids: List[str]
+    file_ids: List[str] = Field(..., min_length=1, max_length=100)
 
 class FileUploadResponse(BaseModel):
     file_id: str

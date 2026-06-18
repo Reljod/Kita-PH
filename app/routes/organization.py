@@ -1,3 +1,4 @@
+import logging
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from typing import List
 from app.models.organization import (
@@ -8,9 +9,12 @@ from app.security import get_current_user, require_org_membership
 from app.dependencies import get_org_service
 from app.services.organization_service import OrganizationService
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/org", tags=["org"])
 
 async def run_org_scaffolding(org_id: str):
+    logger.info(f"Starting organization scaffolding for org_id: {org_id}")
     from app.services.llm_service import LlmService
     from app.services.agent_service import AgentService
     from app.services.tool_service import ToolService
@@ -45,8 +49,9 @@ async def run_org_scaffolding(org_id: str):
 
     try:
         await creation_service.initialize_org(org_id)
+        logger.info(f"Successfully completed organization scaffolding for org_id: {org_id}")
     except Exception as e:
-        print(f"Error running organization scaffolding for {org_id}: {e}")
+        logger.error(f"Error running organization scaffolding for {org_id}: {e}", exc_info=True)
 
 @router.post("/", response_model=OrganizationResponse)
 async def create_organization(
@@ -55,7 +60,9 @@ async def create_organization(
     current_user: UserResponse = Depends(get_current_user),
     org_service: OrganizationService = Depends(get_org_service)
 ):
+    logger.info(f"Attempting to create organization: {org_in.name} by user: {current_user.id}")
     org = org_service.create_org(org_in, current_user.id)
+    logger.info(f"Created organization {org.id}. Queueing scaffolding task.")
     background_tasks.add_task(run_org_scaffolding, org.id)
     return org
 
@@ -157,11 +164,15 @@ async def add_or_update_member(
     if id != authorized_org_id:
         org = org_service.get_org_by_code(id)
         if not org or org.id != authorized_org_id:
+             logger.warning(f"Access denied adding member to org {id} by user {current_user.id}")
              raise HTTPException(status_code=403, detail="Access denied to this organization")
 
+    logger.info(f"Adding/updating member {member_in.user_id} with role {member_in.role} in org {authorized_org_id}")
     org = org_service.add_or_update_member(authorized_org_id, member_in)
     if not org:
+        logger.warning(f"Org {authorized_org_id} not found for member update")
         raise HTTPException(status_code=404, detail="Organization not found")
+    logger.info(f"Successfully added/updated member {member_in.user_id} in org {authorized_org_id}")
     return org
 
 @router.delete("/{id}/member/{user_id}", response_model=OrganizationResponse)
@@ -175,9 +186,13 @@ async def revoke_member(
     if id != authorized_org_id:
         org = org_service.get_org_by_code(id)
         if not org or org.id != authorized_org_id:
+             logger.warning(f"Access denied revoking member from org {id} by user {current_user.id}")
              raise HTTPException(status_code=403, detail="Access denied to this organization")
 
+    logger.info(f"Revoking member {user_id} from org {authorized_org_id}")
     org = org_service.revoke_member(authorized_org_id, user_id)
     if not org:
+        logger.warning(f"Org {authorized_org_id} not found for member revocation")
         raise HTTPException(status_code=404, detail="Organization not found")
+    logger.info(f"Successfully revoked member {user_id} from org {authorized_org_id}")
     return org

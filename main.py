@@ -27,7 +27,9 @@ from app.routes.webhook import facebook
 from app.security import require_org_membership
 from fastapi import Depends
 from app.services.redis_service import RedisService
+from app.middleware.error_handler import setup_error_handlers
 from app.middleware.api_key_auth import ApiKeyAuthMiddleware
+from app.utils.logger import setup_logging, CorrelationIdMiddleware, get_global_headers
 
 
 @asynccontextmanager
@@ -49,14 +51,18 @@ app = FastAPI(
     title="Kita API", 
     description="LLM Python FastAPI app with pymongo and pydantic-ai",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
+    dependencies=[Depends(get_global_headers)]
 )
 
 log_level_str = os.getenv("LOG_LEVEL", "INFO").upper()
 if log_level_str not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
     log_level_str = "INFO"
 
+app_env = os.getenv("APP_ENV", "local").lower()
+
 logfire.configure(
+    environment=app_env,
     distributed_tracing=False,
     scrubbing=False,
     console=logfire.ConsoleOptions(
@@ -66,14 +72,11 @@ logfire.configure(
     )
 )
 logfire.instrument_pydantic_ai()
+logfire.instrument_openai()
 logfire.instrument_fastapi(app)
 
-# Hook standard library logging to logfire console
-logging.basicConfig(
-    handlers=[logfire.LogfireLoggingHandler()],
-    level=getattr(logging, log_level_str),
-    force=True
-)
+# Initialize standard logging with custom LogFormatter
+setup_logging()
 
 # Configure CORS
 allowed_origins = [
@@ -96,7 +99,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.add_middleware(CorrelationIdMiddleware)
 app.add_middleware(ApiKeyAuthMiddleware)
+
+# Set up global exception handlers
+setup_error_handlers(app)
+
 
 
 # Include Routers

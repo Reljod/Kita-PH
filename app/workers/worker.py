@@ -14,6 +14,7 @@ from app.workers.hatchet import hatchet
 from app.workers.workflows.first_workflow import my_task
 from app.workers.workflows.parse_workflow import parse_file_task
 from app.workers.workflows.ingest_workflow import ingest_file_task
+from app.utils.logger import setup_logging
 
 def main():
     # Load environment variables
@@ -23,6 +24,10 @@ def main():
     # Configure Logfire
     logfire.configure()
     logfire.instrument_pydantic_ai()
+    logfire.instrument_openai()
+    
+    # Initialize standard logging with custom LogFormatter
+    setup_logging()
     
     # Initialize database connection
     db.connect()

@@ -6,12 +6,14 @@ from typing import Annotated, Optional
 from pydantic_ai import RunContext
 from app.services.tool_service import ToolService
 from app.services.web_search_service import SerperSearchService
+from app.utils.logger import log_tool_call
 
 logger = logging.getLogger(__name__)
 
 web_search_toolset = FunctionToolset()
 
 @web_search_toolset.tool
+@log_tool_call
 async def web_search(
     ctx: RunContext[dict],
     query: Annotated[str, Field(description="The search query to find information on the web.")],

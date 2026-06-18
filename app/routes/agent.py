@@ -139,8 +139,8 @@ async def get_all_agent_rags(agent_id: str, rag_service: IRagService = Depends(g
 @router.get("/{agent_id}/memory/search", response_model=List[RagResponse])
 async def search_agent_memory(
     agent_id: str,
-    query: str = Query(..., description="The search query to find relevant information in memory."), 
-    limit: int = Query(5, description="The maximum number of results to return."), 
+    query: str = Query(..., min_length=1, max_length=200, description="The search query to find relevant information in memory."), 
+    limit: int = Query(5, ge=1, le=50, description="The maximum number of results to return."), 
     rag_service: IRagService = Depends(get_agent_rag_service)
 ):
     try:

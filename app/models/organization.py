@@ -23,19 +23,19 @@ class OrganizationBase(BaseModel):
 
 
 class OrgCreate(BaseModel):
-    org_name: str
-    org_code: str
+    org_name: str = Field(..., min_length=1, max_length=100)
+    org_code: str = Field(..., min_length=1, max_length=100)
 
 class OrgUpdate(BaseModel):
-    org_name: Optional[str] = None
-    org_code: Optional[str] = None
+    org_name: Optional[str] = Field(None, min_length=1, max_length=100)
+    org_code: Optional[str] = Field(None, min_length=1, max_length=100)
 
 class OrgMemberUpdate(BaseModel):
-    user_id: str
+    user_id: str = Field(..., min_length=1, max_length=100)
     role: OrgRole
 
 class OrgIntegrationUpdate(BaseModel):
-    facebook_page_id: Optional[str] = None
+    facebook_page_id: Optional[str] = Field(None, max_length=100)
 
 class OrganizationResponse(OrganizationBase):
     id: str

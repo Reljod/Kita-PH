@@ -1,10 +1,13 @@
 import os
 import json
 import asyncio
+import logging
 from typing import List, Optional, Dict, Any, Protocol
 from neo4j import GraphDatabase, AsyncGraphDatabase
 from datetime import datetime
 import logfire
+
+logger = logging.getLogger(__name__)
 
 from app.models.graph_rag import (
     GraphNode, GraphRelationship, GraphDocument, 
@@ -111,6 +114,10 @@ class Neo4JGraphRagService:
                 logfire.error(f"Failed to create vector index: {e}")
 
     async def ingest_document(self, doc: GraphDocument, chunks: List[GraphChunk]) -> bool:
+        logger.info(
+            f"Ingesting document in Neo4j GraphRAG: doc_id={doc.id}, title={doc.title}, chunks={len(chunks)}",
+            extra={"doc_id": doc.id, "title": doc.title, "chunks_count": len(chunks)}
+        )
         async with self.driver.session() as session:
             # Create Document Node
             await session.run("""
@@ -219,6 +226,10 @@ class Neo4JGraphRagService:
         2. Traverse graph from chunks to entities and neighbors.
         3. Collect context and return.
         """
+        import time
+        start_time = time.perf_counter()
+        truncated_query = query_text[:150] + "..." if len(query_text) > 150 else query_text
+
         # Calculate embedding
         loop = asyncio.get_event_loop()
         query_embedding = await loop.run_in_executor(None, self.model.encode, query_text)
@@ -314,6 +325,17 @@ class Neo4JGraphRagService:
                     nodes=nodes
                 ))
         
+        duration = time.perf_counter() - start_time
+        logger.info(
+            f"Neo4j GraphRAG query completed: query={truncated_query}, results={len(results)}, duration={duration:.3f}s",
+            extra={
+                "query": truncated_query,
+                "limit": limit,
+                "org_id": self.org_id,
+                "results_count": len(results),
+                "duration": duration
+            }
+        )
         return results
 
     async def upsert_node(self, label: str, properties: Dict[str, Any]) -> str:
