@@ -3,6 +3,11 @@ from app.services.web_search_service import WebSearchService
 from app.services.tools import get_available_tools
 from app.db import TenantCollection
 from datetime import datetime, timezone
+from app.exceptions import (
+    SystemConfigurationError,
+    ToolNotFoundError,
+    ToolRegistrationError
+)
 
 class IToolService(Protocol):
     async def web_search(
@@ -59,11 +64,11 @@ class ToolService(IToolService):
 
     async def register_tool(self, name: str) -> bool:
         if not self.collection:
-            raise ValueError("Collection not provided for ToolService")
+            raise SystemConfigurationError("Collection not provided for ToolService")
 
         available_tools = get_available_tools()
         if name not in available_tools:
-            raise ValueError(f"Tool '{name}' not found in available tools")
+            raise ToolRegistrationError(name, "Tool not found in available tools")
 
         description = available_tools[name]
         
@@ -82,30 +87,42 @@ class ToolService(IToolService):
 
     async def deregister_tool(self, tool_id: str) -> bool:
         if not self.collection:
-            raise ValueError("Collection not provided for ToolService")
+            raise SystemConfigurationError("Collection not provided for ToolService")
         
         from bson import ObjectId
         try:
-            res = self.collection.delete_one({"_id": ObjectId(tool_id)})
-            return res.deleted_count > 0
-        except Exception:
-            return False
+            obj_id = ObjectId(tool_id)
+        except Exception as e:
+            raise ToolRegistrationError(tool_id, f"Invalid tool ID format: {str(e)}")
+
+        res = self.collection.delete_one({"_id": obj_id})
+        if res.deleted_count == 0:
+            raise ToolNotFoundError(tool_id)
+        return True
 
     async def get_tools(self) -> List[dict]:
         if not self.collection:
-            raise ValueError("Collection not provided for ToolService")
+            raise SystemConfigurationError("Collection not provided for ToolService")
         return list(self.collection.find({}))
 
-    async def get_tool(self, tool_id: str) -> Optional[dict]:
+    async def get_tool(self, tool_id: str) -> dict:
         if not self.collection:
-            raise ValueError("Collection not provided for ToolService")
+            raise SystemConfigurationError("Collection not provided for ToolService")
         from bson import ObjectId
         try:
-            return self.collection.find_one({"_id": ObjectId(tool_id)})
-        except Exception:
-            return None
+            obj_id = ObjectId(tool_id)
+        except Exception as e:
+            raise ToolNotFoundError(tool_id, message=f"Invalid tool ID format: {str(e)}")
 
-    async def get_tool_by_name(self, name: str) -> Optional[dict]:
+        tool = self.collection.find_one({"_id": obj_id})
+        if not tool:
+            raise ToolNotFoundError(tool_id)
+        return tool
+
+    async def get_tool_by_name(self, name: str) -> dict:
         if not self.collection:
-            raise ValueError("Collection not provided for ToolService")
-        return self.collection.find_one({"name": name})
+            raise SystemConfigurationError("Collection not provided for ToolService")
+        tool = self.collection.find_one({"name": name})
+        if not tool:
+            raise ToolNotFoundError(name)
+        return tool

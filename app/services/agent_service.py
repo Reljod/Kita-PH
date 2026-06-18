@@ -18,6 +18,13 @@ from app.services.tools.memory_tools import memory_toolset
 from app.services.tools.delegation_tools import delegation_toolset
 from app.services.tools import get_tools_by_names
 from app.db import TenantCollection
+from app.exceptions import (
+    AgentNotFoundError,
+    AgentRunFailedError,
+    AgentRunStreamFailedError,
+    SystemConfigurationError,
+    KitaException
+)
 logger = logging.getLogger(__name__)
 
 
@@ -313,11 +320,11 @@ class AgentService(IAgentService):
     def get_runnable_agent(self, agent_id: str) -> Agent:
         doc = self._get_agent_doc(agent_id)
         if not doc:
-            raise ValueError(f"Agent '{agent_id}' not found")
+            raise AgentNotFoundError(agent_id)
 
         llm = self.llm_service.get_llm(doc["llm_id"])
         if not llm:
-            raise ValueError("LLM associated with Agent not found")
+            raise SystemConfigurationError(f"LLM associated with Agent '{agent_id}' not found")
             
         api_key = os.getenv("OPENROUTER_API_KEY", "")
         model = OpenRouterModel(
@@ -427,14 +434,17 @@ class AgentService(IAgentService):
             except Exception as e:
                 duration = time.perf_counter() - start_time
                 span.set_attribute("duration_seconds", duration)
-                span.set_attribute("error", str(e))
+                
+                wrapped_error = e if isinstance(e, KitaException) else AgentRunFailedError(agent_id, str(e))
+                
+                span.set_attribute("error", wrapped_error.message)
                 logger.error(
-                    f"Agent run failed: agent_id={agent_id}, duration={duration:.3f}s: {e}",
+                    f"Agent run failed: agent_id={agent_id}, duration={duration:.3f}s: {wrapped_error.message}",
                     extra={
                         "agent_id": agent_id,
                         "duration": duration,
                         "query": truncated_query,
-                        "error": str(e),
+                        "error": wrapped_error.to_dict(),
                     },
                     exc_info=True
                 )
@@ -444,7 +454,7 @@ class AgentService(IAgentService):
                         success=False,
                         chat_id=chat_id
                     )
-                raise e
+                raise wrapped_error
 
     async def run_stream(
         self,
@@ -570,14 +580,17 @@ class AgentService(IAgentService):
             except Exception as e:
                 duration = time.perf_counter() - start_time
                 span.set_attribute("duration_seconds", duration)
-                span.set_attribute("error", str(e))
+                
+                wrapped_error = e if isinstance(e, KitaException) else AgentRunStreamFailedError(agent_id, str(e))
+                
+                span.set_attribute("error", wrapped_error.message)
                 logger.error(
-                    f"Agent run stream failed: agent_id={agent_id}, duration={duration:.3f}s: {e}",
+                    f"Agent run stream failed: agent_id={agent_id}, duration={duration:.3f}s: {wrapped_error.message}",
                     extra={
                         "agent_id": agent_id,
                         "duration": duration,
                         "query": truncated_query,
-                        "error": str(e),
+                        "error": wrapped_error.to_dict(),
                     },
                     exc_info=True
                 )
@@ -587,6 +600,6 @@ class AgentService(IAgentService):
                         success=False,
                         chat_id=chat_id
                     )
-                raise e
+                raise wrapped_error
 
 

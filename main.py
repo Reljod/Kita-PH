@@ -27,6 +27,7 @@ from app.routes.webhook import facebook
 from app.security import require_org_membership
 from fastapi import Depends
 from app.services.redis_service import RedisService
+from app.middleware.error_handler import setup_error_handlers
 from app.middleware.api_key_auth import ApiKeyAuthMiddleware
 from app.utils.logger import setup_logging, CorrelationIdMiddleware, get_global_headers
 
@@ -100,6 +101,10 @@ app.add_middleware(
 
 app.add_middleware(CorrelationIdMiddleware)
 app.add_middleware(ApiKeyAuthMiddleware)
+
+# Set up global exception handlers
+setup_error_handlers(app)
+
 
 
 # Include Routers

@@ -8,6 +8,7 @@ from bson import ObjectId
 from app.models.rag import RagCreateRequest, RagUpdateRequest, RagResponse, RagDocument
 from app.db import TenantCollection
 
+from app.exceptions import MemoryNotFoundError
 logger = logging.getLogger(__name__)
 
 EMBEDDING_MODEL = "perplexity/pplx-embed-v1-0.6b"
@@ -51,11 +52,11 @@ async def _rerank(query: str, documents: list[str], top_n: int) -> list:
 class IRagService(Protocol):
     async def add_rag(self, req: RagCreateRequest) -> RagResponse:
         ...
-    async def edit_rag(self, rag_id: str, req: RagUpdateRequest, agent_id: Optional[str] = None) -> Optional[RagResponse]:
+    async def edit_rag(self, rag_id: str, req: RagUpdateRequest, agent_id: Optional[str] = None) -> RagResponse:
         ...
     async def delete_rag(self, rag_id: str, agent_id: Optional[str] = None) -> bool:
         ...
-    def get_rag(self, rag_id: str, agent_id: Optional[str] = None) -> Optional[RagResponse]:
+    def get_rag(self, rag_id: str, agent_id: Optional[str] = None) -> RagResponse:
         ...
     def get_all_rags(self, agent_id: Optional[str] = None) -> List[RagResponse]:
         ...
@@ -116,11 +117,11 @@ class MongoVectorDbRagService(IRagService):
         doc["_id"] = res.inserted_id
         return format_rag_response(doc)
 
-    async def edit_rag(self, rag_id: str, req: RagUpdateRequest, agent_id: Optional[str] = None) -> Optional[RagResponse]:
+    async def edit_rag(self, rag_id: str, req: RagUpdateRequest, agent_id: Optional[str] = None) -> RagResponse:
         try:
             obj_id = ObjectId(rag_id)
         except Exception:
-            raise ValueError("Invalid RAG ID")
+            raise MemoryNotFoundError(rag_id, message=f"Invalid RAG ID: {rag_id}")
 
         update_data = {k: v for k, v in req.model_dump().items() if v is not None}
         if not update_data:
@@ -135,6 +136,11 @@ class MongoVectorDbRagService(IRagService):
         if agent_id:
             query = {"$and": [{"_id": obj_id}, self._get_agent_filter(agent_id)]}
 
+        # Check if exists first to raise correct error
+        existing = self.collection.find_one(query)
+        if not existing:
+            raise MemoryNotFoundError(rag_id)
+
         self.collection.update_one(
             query,
             {"$set": update_data}
@@ -146,20 +152,22 @@ class MongoVectorDbRagService(IRagService):
         try:
             obj_id = ObjectId(rag_id)
         except Exception:
-            raise ValueError("Invalid RAG ID")
+            raise MemoryNotFoundError(rag_id, message=f"Invalid RAG ID: {rag_id}")
         
         query = {"_id": obj_id}
         if agent_id:
             query = {"$and": [{"_id": obj_id}, self._get_agent_filter(agent_id)]}
             
         res = self.collection.delete_one(query)
-        return res.deleted_count > 0
+        if res.deleted_count == 0:
+            raise MemoryNotFoundError(rag_id)
+        return True
 
-    def get_rag(self, rag_id: str, agent_id: Optional[str] = None) -> Optional[RagResponse]:
+    def get_rag(self, rag_id: str, agent_id: Optional[str] = None) -> RagResponse:
         try:
             obj_id = ObjectId(rag_id)
         except Exception:
-            raise ValueError("Invalid RAG ID")
+            raise MemoryNotFoundError(rag_id, message=f"Invalid RAG ID: {rag_id}")
             
         query = {"_id": obj_id}
         if agent_id:
@@ -169,7 +177,7 @@ class MongoVectorDbRagService(IRagService):
             
         doc = self.collection.find_one(query)
         if not doc:
-            return None
+            raise MemoryNotFoundError(rag_id)
             
         return format_rag_response(doc)
 

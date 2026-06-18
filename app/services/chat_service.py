@@ -6,6 +6,11 @@ from pydantic_core import to_jsonable_python
 from pydantic_ai import ModelMessagesTypeAdapter
 from app.services.agent_service import IAgentService
 from app.db import TenantCollection
+from app.exceptions import (
+    ChatNotFoundError,
+    KitaValidationError,
+    AgentRunStreamFailedError
+)
 
 class IChatService(Protocol):
     async def create_chat(self, req: ChatCreateRequest, agent_id: Optional[str] = None, status_key: Optional[str] = None) -> ChatResponse:
@@ -60,7 +65,7 @@ class ChatService(IChatService):
 
     async def create_chat(self, req: ChatCreateRequest, agent_id: Optional[str] = None, status_key: Optional[str] = None) -> ChatResponse:
         if not agent_id:
-            raise ValueError("agent_id is required")
+            raise KitaValidationError("agent_id is required")
 
         chat_id = str(ObjectId())
         
@@ -96,7 +101,7 @@ class ChatService(IChatService):
         try:
             obj_id = ObjectId(chat_id)
         except Exception:
-            raise ValueError("Invalid chat ID")
+            raise ChatNotFoundError(chat_id, message=f"Invalid chat ID: {chat_id}")
             
         chat_query = {"_id": obj_id}
         if agent_id:
@@ -104,11 +109,11 @@ class ChatService(IChatService):
             
         chat = self.collection.find_one(chat_query)
         if not chat:
-            return None
+            raise ChatNotFoundError(chat_id)
             
         agent_to_run_with = agent_id or chat.get("agent_id")
         if not agent_to_run_with:
-            raise ValueError("agent_id is required")
+            raise KitaValidationError("agent_id is required")
 
         # Load history
         message_history = ModelMessagesTypeAdapter.validate_python(chat["messages"])
@@ -149,7 +154,7 @@ class ChatService(IChatService):
         status_key: Optional[str] = None
     ) -> AsyncIterator[dict]:
         if not agent_id:
-            raise ValueError("agent_id is required")
+            raise KitaValidationError("agent_id is required")
 
         chat_id = str(ObjectId())
         
@@ -167,7 +172,7 @@ class ChatService(IChatService):
                 yield chunk
 
         if final_result is None:
-            raise ValueError("No run result returned from agent run stream")
+            raise AgentRunStreamFailedError(agent_id or "unknown", "No run result returned from agent run stream")
 
         messages_dump = to_jsonable_python(final_result.all_messages())
         
@@ -198,7 +203,7 @@ class ChatService(IChatService):
         try:
             obj_id = ObjectId(chat_id)
         except Exception:
-            raise ValueError("Invalid chat ID")
+            raise ChatNotFoundError(chat_id, message=f"Invalid chat ID: {chat_id}")
             
         chat_query = {"_id": obj_id}
         if agent_id:
@@ -206,12 +211,11 @@ class ChatService(IChatService):
             
         chat = self.collection.find_one(chat_query)
         if not chat:
-            yield {"type": "error", "message": "Chat not found"}
-            return
+            raise ChatNotFoundError(chat_id)
             
         agent_to_run_with = agent_id or chat.get("agent_id")
         if not agent_to_run_with:
-            raise ValueError("agent_id is required")
+            raise KitaValidationError("agent_id is required")
 
         # Load history
         message_history = ModelMessagesTypeAdapter.validate_python(chat["messages"])
@@ -230,7 +234,7 @@ class ChatService(IChatService):
                 yield chunk
 
         if final_result is None:
-            raise ValueError("No run result returned from agent run stream")
+            raise AgentRunStreamFailedError(agent_to_run_with or "unknown", "No run result returned from agent run stream")
 
         # Dump new history
         messages_dump = to_jsonable_python(final_result.all_messages())
@@ -259,7 +263,7 @@ class ChatService(IChatService):
         try:
             obj_id = ObjectId(chat_id)
         except Exception:
-            raise ValueError("Invalid chat ID")
+            raise ChatNotFoundError(chat_id, message=f"Invalid chat ID: {chat_id}")
             
         chat_query = {"_id": obj_id}
         if agent_id:
@@ -267,7 +271,7 @@ class ChatService(IChatService):
             
         chat = self.collection.find_one(chat_query)
         if not chat:
-            return None
+            raise ChatNotFoundError(chat_id)
             
         return format_chat_response(chat)
 

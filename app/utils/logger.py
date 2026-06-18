@@ -72,19 +72,55 @@ def log_tool_call(func):
                 duration = time.perf_counter() - start_time
                 span.set_attribute("duration_seconds", duration)
                 span.set_attribute("status", "failed")
-                span.set_attribute("error", str(e))
                 
+                from app.exceptions.base import KitaException
+                if isinstance(e, KitaException):
+                    wrapped_error = e
+                else:
+                    from app.exceptions.tool import (
+                        ToolDelegationError,
+                        ToolMemoryError,
+                        ToolFileError,
+                        ToolGraphRagError,
+                        ToolLlmError,
+                        ToolParseError,
+                        ToolWebSearchError,
+                        ToolAgentCreationError,
+                        ToolException
+                    )
+                    err_msg = str(e)
+                    name_lower = tool_name.lower()
+                    if "delegate" in name_lower:
+                        wrapped_error = ToolDelegationError(f"Delegation tool '{tool_name}' failed: {err_msg}", details={"error": err_msg})
+                    elif "memory" in name_lower or "rag_search" in name_lower:
+                        wrapped_error = ToolMemoryError(f"Memory tool '{tool_name}' failed: {err_msg}", details={"error": err_msg})
+                    elif "file" in name_lower:
+                        wrapped_error = ToolFileError(f"File tool '{tool_name}' failed: {err_msg}", details={"error": err_msg})
+                    elif "graph_rag" in name_lower:
+                        wrapped_error = ToolGraphRagError(f"Graph RAG tool '{tool_name}' failed: {err_msg}", details={"error": err_msg})
+                    elif "llm" in name_lower:
+                        wrapped_error = ToolLlmError(f"LLM tool '{tool_name}' failed: {err_msg}", details={"error": err_msg})
+                    elif "parse" in name_lower:
+                        wrapped_error = ToolParseError(f"Parse tool '{tool_name}' failed: {err_msg}", details={"error": err_msg})
+                    elif "web_search" in name_lower:
+                        wrapped_error = ToolWebSearchError(f"Web search tool '{tool_name}' failed: {err_msg}", details={"error": err_msg})
+                    elif "agent_creation" in name_lower or "agent_tools" in name_lower:
+                        wrapped_error = ToolAgentCreationError(f"Agent management tool '{tool_name}' failed: {err_msg}", details={"error": err_msg})
+                    else:
+                        wrapped_error = ToolException(f"Tool '{tool_name}' failed: {err_msg}", details={"error": err_msg})
+
+                span.set_attribute("error", wrapped_error.message)
                 logger.error(
-                    f"Tool call {tool_name} failed in {duration:.3f}s: {str(e)}",
+                    f"Tool call {tool_name} failed in {duration:.3f}s: {wrapped_error.message}",
                     extra={
                         "tool_name": tool_name,
                         "duration": duration,
                         "status": "failed",
-                        "error": str(e),
+                        "error": wrapped_error.to_dict(),
                     },
                     exc_info=True
                 )
-                raise e
+                raise wrapped_error
     return wrapper
 
 # Define ContextVars for storing request-scoped tracing and authentication context
