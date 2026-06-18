@@ -18,7 +18,7 @@ async def initiate_upload(
     req: FileUploadRequest,
     file_service: FileService = Depends(get_file_service)
 ):
-    logger.info(f"Initiating upload for file: {req.filename} (size: {req.file_size_bytes} bytes)")
+    logger.info(f"Initiating upload for file: {req.filename} (size: {req.size} bytes)")
     try:
         res = await file_service.initiate_upload(req)
         logger.info(f"Successfully initiated upload. Assigned file_id: {res.file_id}")

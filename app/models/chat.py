@@ -8,7 +8,7 @@ class Message(BaseModel):
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class ChatCreateRequest(BaseModel):
-    message: str
+    message: str = Field(..., min_length=1, max_length=10000)
 
 class ChatResponse(BaseModel):
     id: str
@@ -19,7 +19,7 @@ class ChatResponse(BaseModel):
     updated_at: datetime
 
 class ChatContinueRequest(BaseModel):
-    message: str
+    message: str = Field(..., min_length=1, max_length=10000)
 
 # Model to represent DB document
 class ChatDocument(BaseModel):

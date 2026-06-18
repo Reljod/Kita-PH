@@ -3,9 +3,9 @@ from typing import Optional
 from datetime import datetime, timezone
 
 class LlmCreateRequest(BaseModel):
-    name: str
-    model: str
-    provider: str = 'openrouter'
+    name: str = Field(..., min_length=1, max_length=100)
+    model: str = Field(..., min_length=1, max_length=100)
+    provider: str = Field('openrouter', min_length=1, max_length=100)
 
 class LlmResponse(BaseModel):
     id: str

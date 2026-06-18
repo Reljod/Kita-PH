@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, EmailStr
 from typing import Optional
 from datetime import datetime, timezone
 
@@ -12,16 +12,16 @@ class TokenData(BaseModel):
     org_id: Optional[str] = None
 
 class LoginRequest(BaseModel):
-    email: str
-    password: str
-    org_id: Optional[str] = None
-    org_code: Optional[str] = None
+    email: EmailStr
+    password: str = Field(..., min_length=6, max_length=100)
+    org_id: Optional[str] = Field(None, max_length=100)
+    org_code: Optional[str] = Field(None, max_length=100)
 
 class RegisterRequest(BaseModel):
-    email: str
-    password: str
-    first_name: str
-    last_name: str
+    email: EmailStr
+    password: str = Field(..., min_length=6, max_length=100)
+    first_name: str = Field(..., min_length=1, max_length=50)
+    last_name: str = Field(..., min_length=1, max_length=50)
 
 class TokenDocument(BaseModel):
     user_id: str

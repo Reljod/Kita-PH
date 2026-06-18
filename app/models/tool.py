@@ -3,7 +3,7 @@ from typing import Optional
 from datetime import datetime
 
 class ToolRegisterRequest(BaseModel):
-    name: str
+    name: str = Field(..., min_length=1, max_length=100)
 
 class ToolResponse(BaseModel):
     id: str
