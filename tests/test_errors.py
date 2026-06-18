@@ -26,6 +26,11 @@ class TestErrorHandlers(unittest.TestCase):
         def raise_nested_kita_error():
             raise ToolWebSearchError("web_search failed", details={"query": "test query"})
 
+        @cls.test_app.get("/test-auth-session-expired")
+        def raise_auth_session_expired():
+            from app.exceptions.auth import AuthSessionExpiredError
+            raise AuthSessionExpiredError("Your session has expired")
+
         @cls.test_app.get("/test-std-http-error")
         def raise_std_http_error():
             raise HTTPException(status_code=403, detail="Access denied")
@@ -72,6 +77,19 @@ class TestErrorHandlers(unittest.TestCase):
             self.assertIn("web_search failed", data["error"]["message"])
             self.assertEqual(data["error"]["details"], {"query": "test query"})
             self.assertEqual(data["error"]["trace_id"], "test-correlation-id-456")
+        finally:
+            ctx_trace_id.reset(token)
+
+    def test_auth_session_expired_response(self):
+        token = ctx_trace_id.set("test-expired-session-id")
+        try:
+            response = self.client.get("/test-auth-session-expired")
+            self.assertEqual(response.status_code, 401)
+            data = response.json()
+            self.assertIn("error", data)
+            self.assertEqual(data["error"]["code"], "AUTH_SESSION_EXPIRED")
+            self.assertEqual(data["error"]["message"], "Your session has expired")
+            self.assertEqual(data["error"]["trace_id"], "test-expired-session-id")
         finally:
             ctx_trace_id.reset(token)
 

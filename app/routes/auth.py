@@ -23,7 +23,10 @@ async def register(
     existing_user = user_service.get_user_by_email(request.email)
     if existing_user:
         logger.warning(f"Registration failed: email {request.email} already exists")
-        raise HTTPException(status_code=400, detail="Email already registered")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Registration failed. Please verify your details and try again."
+        )
     
     user_in = UserCreate(
         email=request.email,
@@ -51,7 +54,7 @@ async def login(
         logger.warning(f"Login failed: invalid credentials for email: {form_data.username}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect email or password",
+            detail="Incorrect email, password, or organization code",
             headers={"WWW-Authenticate": "Bearer"},
         )
     
@@ -67,7 +70,11 @@ async def login(
             org = org_service.get_org_by_code(org_code)
             if not org:
                 logger.warning(f"Login failed: org code '{org_code}' not found")
-                raise HTTPException(status_code=404, detail=f"Organization code '{org_code}' not found")
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Incorrect email, password, or organization code",
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
             resolved_org_id = org.id
         else:
             resolved_org_id = org_id
@@ -76,12 +83,20 @@ async def login(
         target_org = org_service.get_org(resolved_org_id)
         if not target_org:
             logger.warning(f"Login failed: org {resolved_org_id} not found")
-            raise HTTPException(status_code=404, detail="Organization not found")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Incorrect email, password, or organization code",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
             
         is_member = any(m.user_id == user_id for m in target_org.org_members)
         if not is_member:
             logger.warning(f"Login failed: user {user_id} is not a member of org {resolved_org_id}")
-            raise HTTPException(status_code=403, detail="User is not a member of this organization")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Incorrect email, password, or organization code",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
     else:
         # No org identification provided
         if user_orgs:

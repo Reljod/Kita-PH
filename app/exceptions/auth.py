@@ -12,3 +12,8 @@ class ForbiddenError(AuthException):
 class InvalidApiKeyOrClientError(AuthException):
     code = "AUTH_INVALID_KEY_OR_ID"
     status_code = 401
+
+class AuthSessionExpiredError(AuthException):
+    code = "AUTH_SESSION_EXPIRED"
+    status_code = 401
+

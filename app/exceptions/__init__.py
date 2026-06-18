@@ -17,7 +17,8 @@ from app.exceptions.system import (
 from app.exceptions.auth import (
     UnauthorizedError,
     ForbiddenError,
-    InvalidApiKeyOrClientError
+    InvalidApiKeyOrClientError,
+    AuthSessionExpiredError
 )
 from app.exceptions.agent import (
     AgentNotFoundError,
