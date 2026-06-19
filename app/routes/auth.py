@@ -28,13 +28,14 @@ async def register(
             detail="Registration failed. Please verify your details and try again."
         )
     
+    hashed_password = await user_service.hash_password_async(request.password)
     user_in = UserCreate(
         email=request.email,
-        password=request.password,
+        password=hashed_password,
         first_name=request.first_name,
         last_name=request.last_name
     )
-    user = user_service.create_user(user_in)
+    user = user_service.create_user(user_in, prehashed=True)
     logger.info(f"Successfully registered user with email: {request.email}, user_id: {user.id}")
     return auth_service.generate_tokens(user.id)
 
@@ -50,7 +51,8 @@ async def login(
     logger.info(f"Attempting login for email: {form_data.username}")
     # 1. Authenticate user
     user = user_service.get_user_by_email(form_data.username)
-    if not user or not user_service.verify_password(form_data.password, user["password"]):
+    password_valid = user and await user_service.verify_password_async(form_data.password, user["password"])
+    if not password_valid:
         logger.warning(f"Login failed: invalid credentials for email: {form_data.username}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
