@@ -1,3 +1,4 @@
+import asyncio
 from typing import Optional
 from datetime import datetime, timezone
 from bson import ObjectId
@@ -10,23 +11,39 @@ class UserService:
         self.collection = Database.get_users_collection()
 
     def hash_password(self, password: str) -> str:
-        # Encode password to bytes
+        # Synchronous bcrypt hash — only use from sync contexts.
         password_bytes = password.encode('utf-8')
-        # Generate salt and hash
         salt = bcrypt.gensalt()
         hashed = bcrypt.hashpw(password_bytes, salt)
-        # Return as string for database storage
         return hashed.decode('utf-8')
 
+    async def hash_password_async(self, password: str) -> str:
+        # bcrypt.gensalt + bcrypt.hashpw are CPU-bound. Offload to thread pool.
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self.hash_password, password)
+
     def verify_password(self, plain_password: str, hashed_password: str) -> bool:
-        # Encode both to bytes
+        # Synchronous bcrypt check — only use from sync contexts.
         password_bytes = plain_password.encode('utf-8')
         hashed_bytes = hashed_password.encode('utf-8')
-        # Verify
         return bcrypt.checkpw(password_bytes, hashed_bytes)
 
-    def create_user(self, user_in: UserCreate) -> UserResponse:
-        hashed_password = self.hash_password(user_in.password)
+    async def verify_password_async(self, plain_password: str, hashed_password: str) -> bool:
+        # bcrypt.checkpw is CPU-bound and blocks the event loop for hundreds of
+        # milliseconds. Running it in a thread-pool executor keeps the async
+        # event loop free, preventing Cloudflare 502/524 timeout errors.
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,  # default ThreadPoolExecutor
+            self.verify_password,
+            plain_password,
+            hashed_password
+        )
+
+    def create_user(self, user_in: UserCreate, prehashed: bool = False) -> UserResponse:
+        # If prehashed=True, the password was already hashed asynchronously upstream.
+        # Otherwise hash it synchronously here (only safe in sync context).
+        hashed_password = user_in.password if prehashed else self.hash_password(user_in.password)
         user_dict = user_in.model_dump()
         user_dict["password"] = hashed_password
         user_dict["created_at"] = datetime.now(timezone.utc)
