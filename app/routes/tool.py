@@ -19,6 +19,8 @@ async def get_tools(service: IToolService = Depends(get_tool_service)):
     try:
         tools = await service.get_tools()
         return [format_tool_response(t) for t in tools]
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -38,6 +40,8 @@ async def register_tool(req: ToolRegisterRequest, service: IToolService = Depend
         return {"message": "Tool registered successfully"}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -48,6 +52,8 @@ async def get_tool(tool_id: str, service: IToolService = Depends(get_tool_servic
         if not tool:
             raise HTTPException(status_code=404, detail="Tool not found")
         return format_tool_response(tool)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -58,6 +64,8 @@ async def get_tool_by_name(name: str, service: IToolService = Depends(get_tool_s
         if not tool:
             raise HTTPException(status_code=404, detail="Tool not found")
         return format_tool_response(tool)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -68,6 +76,8 @@ async def deregister_tool(tool_id: str, service: IToolService = Depends(get_tool
         if not success:
             raise HTTPException(status_code=404, detail="Tool not found")
         return {"message": f"Tool '{tool_id}' deregistered successfully"}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

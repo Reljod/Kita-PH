@@ -180,6 +180,8 @@ async def update_agent_rag(
         return rag
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error updating agent memory: {str(e)}")
 
@@ -192,6 +194,8 @@ async def delete_agent_rag(agent_id: str, rag_id: str, rag_service: IRagService 
         return {"message": "Memory deleted successfully"}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error deleting agent memory: {str(e)}")
 
