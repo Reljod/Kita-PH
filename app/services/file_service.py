@@ -1,5 +1,6 @@
 import os
 import uuid
+import asyncio
 import logging
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone
@@ -210,7 +211,10 @@ class FileService:
         storage_path = f"{file_id}.{extension}" if extension else file_id
         
         try:
-            return self.supabase.storage.from_(self.bucket_name).download(storage_path)
+            return await asyncio.to_thread(
+                self.supabase.storage.from_(self.bucket_name).download,
+                storage_path
+            )
         except Exception as e:
             raise FileUploadFailedError(f"Failed to download file from storage: {str(e)}")
 
