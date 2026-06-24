@@ -1,5 +1,7 @@
 import logging
+import mimetypes
 from fastapi import APIRouter, HTTPException, Depends, status, Query, Header
+from fastapi.responses import Response
 from typing import List, Optional
 from app.models.file import FileResponse, FileUploadRequest, FileUploadResponse, FileUpdateRequest, BatchFileCompleteRequest
 from app.services.file_service import FileService
@@ -12,6 +14,12 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/files", tags=["Files"])
 
 from app.dependencies import get_file_service
+
+def _guess_content_type(extension: str) -> str:
+    if not extension:
+        return "application/octet-stream"
+    ext = f".{extension.lower()}"
+    return mimetypes.guess_type(f"file{ext}")[0] or "application/octet-stream"
 
 @router.post("/upload", response_model=FileUploadResponse, status_code=status.HTTP_201_CREATED)
 async def initiate_upload(
@@ -99,3 +107,21 @@ async def batch_complete_uploads(
     except Exception as e:
         logger.error(f"Error completing batch uploads: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error completing batch uploads: {str(e)}")
+
+@router.get("/{file_id}/preview")
+async def preview_file(
+    file_id: str,
+    file_service: FileService = Depends(get_file_service)
+):
+    logger.info(f"Previewing file: file_id={file_id}")
+    file_meta = await file_service.get_file(file_id)
+    file_bytes = await file_service.download_file(file_id)
+    content_type = file_meta.content_type or _guess_content_type(file_meta.extension)
+    return Response(
+        content=file_bytes,
+        media_type=content_type,
+        headers={
+            "Content-Disposition": f"inline; filename=\"{file_meta.filename}\"",
+            "Content-Length": str(len(file_bytes)),
+        }
+    )
