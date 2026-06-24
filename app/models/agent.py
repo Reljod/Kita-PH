@@ -26,6 +26,7 @@ class AgentUpdateRequest(BaseModel):
     llm_id: Optional[str] = Field(None, min_length=1, max_length=100)
     personalities: Optional[List[str]] = Field(None, max_length=50)
     tools: Optional[List[str]] = Field(None, max_length=50)
+    config: Optional[Dict[str, Any]] = None
 
 class AddToolsRequest(BaseModel):
     tool_ids: List[str] = Field(..., min_length=1, max_length=50)
@@ -60,6 +61,7 @@ class AgentDocument(BaseModel):
     personalities: Optional[List[str]] = None
     llm_id: str
     tools: Optional[List[str]] = Field(default_factory=list)
+    config: Dict[str, Any] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 

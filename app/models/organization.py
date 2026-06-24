@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
 from enum import Enum
 
@@ -20,6 +20,7 @@ class OrganizationBase(BaseModel):
     org_code: str = ""
     integrations: Optional[Integrations] = Field(default_factory=Integrations)
     status: Optional[str] = "completed"
+    config: Dict[str, Any] = Field(default_factory=dict)
 
 
 class OrgCreate(BaseModel):
@@ -36,6 +37,10 @@ class OrgMemberUpdate(BaseModel):
 
 class OrgIntegrationUpdate(BaseModel):
     facebook_page_id: Optional[str] = Field(None, max_length=100)
+
+class OrganizationConfigUpdate(BaseModel):
+    max_delegation_depth: Optional[int] = Field(None, ge=1, le=50)
+    max_websearch_depth: Optional[int] = Field(None, ge=1, le=50)
 
 class OrganizationResponse(OrganizationBase):
     id: str

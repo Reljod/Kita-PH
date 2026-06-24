@@ -183,6 +183,7 @@ class AgentService(IAgentService):
                 "personalities": req.personalities if req.personalities is not None else latest_doc.get("personalities"),
                 "llm_id": req.llm_id if req.llm_id is not None else latest_doc["llm_id"],
                 "tools": req.tools if req.tools is not None else latest_doc.get("tools", []),
+                "config": req.config if req.config is not None else latest_doc.get("config", {}),
                 "base_id": base_id,
                 "version": new_version_num,
                 "created_at": latest_doc.get("created_at", datetime.now(timezone.utc)),
@@ -202,6 +203,7 @@ class AgentService(IAgentService):
             if req.personalities is not None: update_fields["personalities"] = req.personalities
             if req.llm_id is not None: update_fields["llm_id"] = req.llm_id
             if req.tools is not None: update_fields["tools"] = req.tools
+            if req.config is not None: update_fields["config"] = req.config
             update_fields["updated_at"] = datetime.now(timezone.utc)
             
             self.collection.update_one(
@@ -264,6 +266,7 @@ class AgentService(IAgentService):
             "backstory": latest_doc["backstory"],
             "personalities": latest_doc.get("personalities"),
             "llm_id": latest_doc["llm_id"],
+            "config": latest_doc.get("config", {}),
             "tools": current_tools,
             "base_id": base_id,
             "version": new_version_num,
@@ -292,6 +295,7 @@ class AgentService(IAgentService):
             "backstory": latest_doc["backstory"],
             "personalities": latest_doc.get("personalities"),
             "llm_id": latest_doc["llm_id"],
+            "config": latest_doc.get("config", {}),
             "tools": current_tools,
             "base_id": base_id,
             "version": new_version_num,
@@ -349,12 +353,26 @@ class AgentService(IAgentService):
 
     def _get_deps(self, agent_id: str, status_key: Optional[str] = None) -> dict[str, Any]:
         from app.dependencies.services import get_services
+        from app.services.guardrail_service import resolve_guardrails
         services = get_services(self.collection.org_id)
+
+        org_doc = None
+        try:
+            org_doc = services.organization_service.collection.find_one({"_id": ObjectId(self.collection.org_id)})
+        except Exception:
+            org_doc = services.organization_service.collection.find_one({"_id": self.collection.org_id})
+        org_config = org_doc.get("config", {}) if org_doc else {}
+
+        agent_doc = self._get_agent_doc(agent_id)
+        agent_config = agent_doc.get("config", {}) if agent_doc else {}
+
+        guardrails = resolve_guardrails(agent_config, org_config)
 
         return {
             "org_id": self.collection.org_id, 
             "agent_id": agent_id, 
             "status_key": status_key,
+            "guardrails": guardrails,
             "agent_service": self,
             "file_service": services.file_service,
             "parse_service": services.parse_service,

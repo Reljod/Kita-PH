@@ -1,4 +1,4 @@
-from typing import Optional, List
+from typing import Any, Dict, Optional, List
 from datetime import datetime, timezone
 from bson import ObjectId
 from app.db import Database
@@ -91,6 +91,24 @@ class OrganizationService:
         result = self.collection.find_one_and_update(
             {"_id": ObjectId(org_id)},
             {"$set": update_data},
+            return_document=True
+        )
+        if result:
+            result["id"] = str(result["_id"])
+            return OrganizationResponse(**result)
+        return None
+
+    def update_organization_config(self, org_id: str, config: Dict[str, Any]) -> Optional[OrganizationResponse]:
+        if not config:
+            return self.get_org(org_id)
+
+        set_data = {"updated_at": datetime.now(timezone.utc)}
+        for k, v in config.items():
+            set_data[f"config.{k}"] = v
+
+        result = self.collection.find_one_and_update(
+            {"_id": ObjectId(org_id)},
+            {"$set": set_data},
             return_document=True
         )
         if result:

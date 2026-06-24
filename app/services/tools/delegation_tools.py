@@ -20,10 +20,18 @@ async def delegate_task(
     Wait for the sub-agent to complete its task and return the results.
     """
     from app.services.agent_service import IAgentService
+    from app.services.guardrail_service import DEFAULT_GUARDRAILS
     
     agent_service: IAgentService = ctx.deps.get("agent_service")
     if not agent_service:
         return "Error: Agent service not found in dependencies."
+    
+    guardrails = ctx.deps.get("guardrails", DEFAULT_GUARDRAILS)
+    max_depth = guardrails.get("max_delegation_depth", DEFAULT_GUARDRAILS["max_delegation_depth"])
+    
+    current_depth = ctx.deps.get("_delegation_depth", 0)
+    if current_depth >= max_depth:
+        return f"Error: Maximum delegation depth ({max_depth}) reached. Cannot delegate further."
     
     # Use target_agent_id if provided, otherwise fallback to current agent_id from deps
     actual_agent_id = target_agent_id or ctx.deps.get("agent_id")
@@ -42,11 +50,13 @@ async def delegate_task(
                 import logfire
                 logfire.error("Failed to update status in delegate_task: {error}", error=str(e))
 
-        # Run sub-agent with the provided task.
-        # We pass the full deps from ctx.deps to allow nested agents access to all tools (RAG, etc.)
+        # Pass incremented depth to sub-agent via a shallow copy of deps
+        child_deps = dict(ctx.deps)
+        child_deps["_delegation_depth"] = current_depth + 1
+
         result = await sub_agent.run(
             task_description, 
-            deps=ctx.deps,
+            deps=child_deps,
             usage=ctx.usage
         )
         
