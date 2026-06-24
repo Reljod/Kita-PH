@@ -60,7 +60,7 @@ async def create_organization(
     current_user: UserResponse = Depends(get_current_user),
     org_service: OrganizationService = Depends(get_org_service)
 ):
-    logger.info(f"Attempting to create organization: {org_in.name} by user: {current_user.id}")
+    logger.info(f"Attempting to create organization: {org_in.org_name} by user: {current_user.id}")
     org = org_service.create_org(org_in, current_user.id)
     logger.info(f"Created organization {org.id}. Queueing scaffolding task.")
     background_tasks.add_task(run_org_scaffolding, org.id)

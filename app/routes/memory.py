@@ -76,6 +76,8 @@ async def update_rag(
         return rag
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error updating memory: {str(e)}")
 
@@ -92,5 +94,7 @@ async def delete_rag(
         return {"message": "Memory deleted successfully"}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error deleting memory: {str(e)}")
