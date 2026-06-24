@@ -1,16 +1,24 @@
+import asyncio
+import json
+import logging
 from bson import ObjectId
 from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any, Protocol, AsyncIterator
 from app.models.chat import ChatCreateRequest, ChatResponse, ChatContinueRequest, ChatDocument
 from pydantic_core import to_jsonable_python
 from pydantic_ai import ModelMessagesTypeAdapter
+from pydantic_ai.messages import SystemPromptMessage
 from app.services.agent_service import IAgentService
+from app.services.chat_context_service import ChatContextService
+from app.services.chat_archive_service import ChatArchiveService
 from app.db import TenantCollection
 from app.exceptions import (
     ChatNotFoundError,
     KitaValidationError,
     AgentRunStreamFailedError
 )
+
+logger = logging.getLogger(__name__)
 
 class IChatService(Protocol):
     async def create_chat(self, req: ChatCreateRequest, agent_id: Optional[str] = None, status_key: Optional[str] = None) -> ChatResponse:
@@ -58,10 +66,80 @@ class ChatService(IChatService):
     def __init__(
         self, 
         agent_service: IAgentService, 
-        collection: TenantCollection
+        collection: TenantCollection,
+        chat_context_service: Optional[ChatContextService] = None,
+        chat_archive_service: Optional[ChatArchiveService] = None,
     ):
         self.agent_service = agent_service
         self.collection = collection
+        self.chat_context_service = chat_context_service
+        self.chat_archive_service = chat_archive_service
+
+    def _count_turns(self, messages: list) -> int:
+        turn_count = 0
+        for msg in messages:
+            role = ""
+            if isinstance(msg, dict):
+                role = msg.get("role", "")
+            else:
+                role = getattr(msg, "role", "")
+            if role == "user":
+                turn_count += 1
+        return turn_count
+
+    async def _inject_context(self, chat_doc: dict, message_history: list) -> list:
+        chat_id = str(chat_doc["_id"])
+        extra_messages = []
+
+        if self.chat_archive_service and chat_doc.get("summary"):
+            extra_messages.append(
+                SystemPromptMessage(content=f"Archived conversation summary:\n{chat_doc['summary']}")
+            )
+
+        if self.chat_context_service:
+            facts_text = await self.chat_context_service.format_facts_for_prompt(chat_id)
+            if facts_text:
+                extra_messages.append(SystemPromptMessage(content=facts_text))
+
+        return extra_messages + list(message_history) if extra_messages else list(message_history)
+
+    async def _post_process_run(self, chat_id: str, chat_doc: dict, messages_dump: list):
+        turn_count = self._count_turns(messages_dump)
+        update_fields = {
+            "message_count": turn_count,
+            "updated_at": datetime.now(timezone.utc)
+        }
+
+        if self.chat_archive_service:
+            kept_messages, summary = await self.chat_archive_service.archive_old_messages(
+                chat_id, messages_dump, org_id=self.collection.org_id
+            )
+            if summary:
+                update_fields["messages"] = kept_messages
+                update_fields["summary"] = summary
+
+        self.collection.update_one(
+            {"_id": ObjectId(chat_id)},
+            {"$set": update_fields}
+        )
+
+        asyncio.create_task(self._extract_facts(chat_id, messages_dump))
+
+    async def _extract_facts(self, chat_id: str, messages_dump: list):
+        try:
+            context_agent = self.agent_service.get_agent_by_name("__system__context_agent")
+            if not context_agent:
+                return
+            serialized = json.dumps(messages_dump, default=str)
+            truncated = serialized[:5000]
+            prompt = f"Extract important facts from this conversation turn:\n\n{truncated}"
+            await self.agent_service.run(
+                agent_id=context_agent.id,
+                query=prompt,
+                chat_id=chat_id,
+            )
+        except Exception as e:
+            logger.warning(f"Fact extraction failed for chat {chat_id}: {e}")
 
     async def create_chat(self, req: ChatCreateRequest, agent_id: Optional[str] = None, status_key: Optional[str] = None) -> ChatResponse:
         if not agent_id:
@@ -95,6 +173,8 @@ class ChatService(IChatService):
         doc["_id"] = ObjectId(chat_id)
         self.collection.insert_one(doc)
         
+        await self._post_process_run(chat_id, doc, messages_dump)
+        
         return format_chat_response(doc)
 
     async def continue_chat(self, chat_id: str, req: ChatContinueRequest, agent_id: Optional[str] = None, status_key: Optional[str] = None) -> Optional[ChatResponse]:
@@ -117,6 +197,9 @@ class ChatService(IChatService):
 
         # Load history
         message_history = ModelMessagesTypeAdapter.validate_python(chat["messages"])
+
+        # Inject archived summary and KV facts into context
+        message_history = await self._inject_context(chat, message_history)
 
         result = await self.agent_service.run(
             agent_id=agent_to_run_with,
@@ -143,6 +226,8 @@ class ChatService(IChatService):
             {"_id": obj_id},
             {"$set": update_fields}
         )
+
+        await self._post_process_run(chat_id, chat, messages_dump)
         
         updated_doc = self.collection.find_one({"_id": obj_id})
         return format_chat_response(updated_doc)
@@ -190,6 +275,8 @@ class ChatService(IChatService):
         doc["_id"] = ObjectId(chat_id)
         self.collection.insert_one(doc)
         
+        await self._post_process_run(chat_id, doc, messages_dump)
+        
         chat_resp = format_chat_response(doc)
         yield {"type": "done", "chat": to_jsonable_python(chat_resp)}
 
@@ -219,6 +306,9 @@ class ChatService(IChatService):
 
         # Load history
         message_history = ModelMessagesTypeAdapter.validate_python(chat["messages"])
+
+        # Inject archived summary and KV facts into context
+        message_history = await self._inject_context(chat, message_history)
 
         final_result = None
         async for chunk in self.agent_service.run_stream(
@@ -253,6 +343,8 @@ class ChatService(IChatService):
             {"_id": obj_id},
             {"$set": update_fields}
         )
+
+        await self._post_process_run(chat_id, chat, messages_dump)
         
         updated_doc = self.collection.find_one({"_id": obj_id})
         chat_resp = format_chat_response(updated_doc)

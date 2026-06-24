@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 class IAgentService(Protocol):
     async def create_agent(self, req: AgentCreateRequest) -> AgentResponse: ...
     async def update_agent(self, agent_id: str, req: AgentUpdateRequest, new_version: bool = True) -> Optional[AgentResponse]: ...
+    def get_agent_by_name(self, name: str) -> Optional[AgentResponse]: ...
     def get_agent(self, agent_id: str) -> Optional[AgentResponse]: ...
     def get_all_agents(self, include_last_chat: bool = False) -> List[AgentResponse]: ...
     def delete_agent(self, agent_id: str) -> bool: ...
@@ -162,8 +163,16 @@ class AgentService(IAgentService):
         doc = self._get_agent_doc(agent_id)
         if not doc:
             return None
+        if doc.get("name", "").startswith("__system__"):
+            return None
         system_prompt = self._build_prompt_from_doc(doc)
         return format_agent_response(doc, system_prompt=system_prompt)
+
+    def get_agent_by_name(self, name: str) -> Optional[AgentResponse]:
+        doc = self.collection.find_one({"name": name}, sort=[("version", -1)])
+        if not doc:
+            return None
+        return format_agent_response(doc)
 
     async def update_agent(self, agent_id: str, req: AgentUpdateRequest, new_version: bool = True) -> Optional[AgentResponse]:
         doc = self._get_agent_doc(agent_id)
@@ -223,7 +232,11 @@ class AgentService(IAgentService):
         ]
         latest_agents = list(self.collection.aggregate(pipeline))
         # System prompt is omitted in list view for performance
-        db_agents = [format_agent_response(a["doc"]) for a in latest_agents]
+        db_agents = [
+            format_agent_response(a["doc"])
+            for a in latest_agents
+            if not a["doc"].get("name", "").startswith("__system__")
+        ]
         
         if include_last_chat:
             from app.services.chat_service import ChatService
@@ -347,7 +360,7 @@ class AgentService(IAgentService):
             toolsets=[delegation_toolset]
         )
 
-    def _get_deps(self, agent_id: str, status_key: Optional[str] = None) -> dict[str, Any]:
+    def _get_deps(self, agent_id: str, status_key: Optional[str] = None, chat_id: Optional[str] = None) -> dict[str, Any]:
         from app.dependencies.services import get_services
         services = get_services(self.collection.org_id)
 
@@ -355,6 +368,7 @@ class AgentService(IAgentService):
             "org_id": self.collection.org_id, 
             "agent_id": agent_id, 
             "status_key": status_key,
+            "chat_id": chat_id,
             "agent_service": self,
             "file_service": services.file_service,
             "parse_service": services.parse_service,
@@ -389,7 +403,7 @@ class AgentService(IAgentService):
         with logfire.span("agent_run", agent_id=agent_id, query=truncated_query) as span:
             try:
                 agent = self.get_runnable_agent(agent_id=agent_id)
-                deps = self._get_deps(agent_id, status_key=status_key)
+                deps = self._get_deps(agent_id, status_key=status_key, chat_id=chat_id)
 
                 if status_key:
                     await services.agent_status_service.update_step(status_key, "draft_response", agent_id)
@@ -482,7 +496,7 @@ class AgentService(IAgentService):
         with logfire.span("agent_run_stream", agent_id=agent_id, query=truncated_query) as span:
             try:
                 agent = self.get_runnable_agent(agent_id=agent_id)
-                deps = self._get_deps(agent_id, status_key=status_key)
+                deps = self._get_deps(agent_id, status_key=status_key, chat_id=chat_id)
 
                 if status_key:
                     await services.agent_status_service.update_step(status_key, "draft_response", agent_id)

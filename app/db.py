@@ -63,6 +63,14 @@ class Database:
     def get_file_parsed_flattened_collection(cls) -> Collection:
         return cls.db["file_parsed_flattened"]
 
+    @classmethod
+    def get_chat_contexts_collection(cls) -> Collection:
+        return cls.db["chat_contexts"]
+
+    @classmethod
+    def get_chat_archives_collection(cls) -> Collection:
+        return cls.db["chat_archives"]
+
 db = Database()
 
 from typing import Mapping, Any, Optional

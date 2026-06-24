@@ -75,6 +75,18 @@ class OrganizationCreationService:
         llm = self.llm_service.add_llm(req)
         return llm.id
     
+    def generate_context_llm(self) -> str:
+        context_model = os.getenv("CONTEXT_LLM_MODEL", "google/gemini-2.0-flash-001")
+        name = f"openrouter/{context_model}"
+        from app.models.llm import LlmCreateRequest
+        req = LlmCreateRequest(
+            name=name,
+            model=context_model,
+            provider="openrouter"
+        )
+        llm = self.llm_service.add_llm(req)
+        return llm.id
+
     async def generate_default_agents(self, llm_id: str):
         from bson import ObjectId
         from pathlib import Path
@@ -130,6 +142,16 @@ class OrganizationCreationService:
             if tid:
                 creator_tools.append(tid)
 
+        # 3. Context Agent LLM and tools
+        context_llm_id = self.generate_context_llm()
+        context_backstory = read_instructions(
+            "context_agent",
+            "You are a context extraction agent. Extract important facts from conversations."
+        )
+        context_tools = []
+        remember_fact_id = await get_tool_id("remember_fact")
+        if remember_fact_id:
+            context_tools.append(remember_fact_id)
 
         # Seeding agents
         kita_id = ObjectId()
@@ -164,9 +186,26 @@ class OrganizationCreationService:
             "updated_at": datetime.now(timezone.utc)
         }
 
+        context_id = ObjectId()
+        context_doc = {
+            "_id": context_id,
+            "base_id": str(context_id),
+            "version": 1,
+            "name": "__system__context_agent",
+            "role": "Context Extraction Agent",
+            "goal": "Extract and store important facts from conversations to provide personalized responses.",
+            "backstory": context_backstory,
+            "personalities": None,
+            "llm_id": context_llm_id,
+            "tools": context_tools,
+            "created_at": datetime.now(timezone.utc),
+            "updated_at": datetime.now(timezone.utc)
+        }
+
 
         self.agent_service.collection.insert_one(kita_doc)
         self.agent_service.collection.insert_one(creator_doc)
+        self.agent_service.collection.insert_one(context_doc)
 
 
     async def generate_default_tools(self):
@@ -195,5 +234,7 @@ class OrganizationCreationService:
         self.agent_service.collection.delete_many({})
         self.tool_service.collection.delete_many({})
         self.rag_service.collection.delete_many({})
+        from app.db import db
+        db.get_chat_contexts_collection().delete_many({"org_id": org_id})
         print(f"[REVERT] Successfully deleted all scaffolding records for {org_id}.")
 
