@@ -28,6 +28,17 @@ async def web_search(
     Performs a web search to find relevant and up-to-date information.
     Use this tool when you need information from the internet that might not be in your training data.
     """
+    from app.services.guardrail_service import DEFAULT_GUARDRAILS
+
+    guardrails = ctx.deps.get("guardrails", DEFAULT_GUARDRAILS)
+    max_depth = guardrails.get("max_websearch_depth", DEFAULT_GUARDRAILS["max_websearch_depth"])
+
+    search_count = ctx.deps.get("_websearch_count", 0) + 1
+    ctx.deps["_websearch_count"] = search_count
+
+    if search_count > max_depth:
+        return f"Error: Maximum web search depth ({max_depth}) reached. Cannot perform more searches in this turn."
+
     # Update status key if present in deps
     status_key = ctx.deps.get("status_key") if ctx.deps else None
     if status_key:

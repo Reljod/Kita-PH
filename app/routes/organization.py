@@ -2,7 +2,8 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from typing import List
 from app.models.organization import (
-    OrganizationResponse, OrgCreate, OrgUpdate, OrgMemberUpdate, OrgIntegrationUpdate
+    OrganizationResponse, OrgCreate, OrgUpdate, OrgMemberUpdate, OrgIntegrationUpdate,
+    OrganizationConfigUpdate
 )
 from app.models.user import UserResponse
 from app.security import get_current_user, require_org_membership
@@ -149,6 +150,25 @@ async def update_organization_integrations(
              raise HTTPException(status_code=403, detail="Access denied to this organization")
 
     org = org_service.update_integrations(authorized_org_id, integration_in)
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    return org
+
+@router.patch("/{id}/config", response_model=OrganizationResponse)
+async def update_organization_config(
+    id: str,
+    config_in: OrganizationConfigUpdate,
+    current_user: UserResponse = Depends(get_current_user),
+    org_service: OrganizationService = Depends(get_org_service),
+    authorized_org_id: str = Depends(require_org_membership)
+):
+    if id != authorized_org_id:
+        org = org_service.get_org_by_code(id)
+        if not org or org.id != authorized_org_id:
+            raise HTTPException(status_code=403, detail="Access denied to this organization")
+
+    config_update = {k: v for k, v in config_in.model_dump(exclude_none=True).items()}
+    org = org_service.update_organization_config(authorized_org_id, config_update)
     if not org:
         raise HTTPException(status_code=404, detail="Organization not found")
     return org
