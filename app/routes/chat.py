@@ -75,6 +75,40 @@ async def get_all_chats(
 ):
     return chat_service.get_all_chats(agent_id=x_agent_id)
 
+@router.get("/{chat_id}/messages", dependencies=[Depends(require_org_membership)])
+async def get_chat_messages(
+    chat_id: str,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    chat_service: IChatService = Depends(get_chat_service),
+    org_id: str = Depends(require_org_membership),
+    x_agent_id: Optional[str] = Header(None, alias="x-agent-id"),
+):
+    chat = chat_service.get_chat(chat_id, agent_id=x_agent_id)
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
+
+    from app.db import db
+
+    coll = db.get_chat_archives_collection()
+    cursor = (
+        coll.find({"chat_id": chat_id, "org_id": org_id})
+        .sort("created_at", -1)
+        .skip((page - 1) * page_size)
+        .limit(page_size)
+    )
+    archives = []
+    for doc in cursor:
+        doc["_id"] = str(doc["_id"])
+        archives.append(doc)
+
+    return {
+        "messages": chat.messages,
+        "archives": archives,
+        "page": page,
+        "page_size": page_size,
+    }
+
 @router.get("/status/{status_key}", dependencies=[Depends(require_org_membership)])
 async def get_agent_status(
     status_key: str,

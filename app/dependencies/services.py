@@ -17,6 +17,8 @@ from app.services.parse_service import LlamaParseService
 from app.services.graph_rag_service import Neo4JGraphRagService
 from app.services.rag_service import IRagService, MongoVectorDbRagService
 from app.services.chat_service import IChatService, ChatService
+from app.services.chat_context_service import ChatContextService
+from app.services.chat_archive_service import ChatArchiveService
 from app.services.rag.nested_data_enrichment_service import INestedDataEnrichmentService, NestedDataEnrichmentService
 from app.services.rag.mongodb_vector_search_rag_service import MongoDBVectorSearchRagService
 from app.services.rag.mongodb_text_search_rag_service import MongoDBTextSearchRagService
@@ -147,9 +149,18 @@ class ServiceRegistry:
             web_search_service=self.web_search_service
         )
         
+        self.chat_context_service = ChatContextService(
+            collection=TenantCollection(db.get_chat_contexts_collection(), org_id)
+        )
+        self.chat_archive_service = ChatArchiveService(
+            collection=TenantCollection(db.get_chat_archives_collection(), org_id)
+        )
+
         self.chat_service = ChatService(
             agent_service=self.agent_service,
-            collection=TenantCollection(db.get_chats_collection(), org_id)
+            collection=TenantCollection(db.get_chats_collection(), org_id),
+            chat_context_service=self.chat_context_service,
+            chat_archive_service=self.chat_archive_service,
         )
 
 

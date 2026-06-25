@@ -26,5 +26,7 @@ class ChatDocument(BaseModel):
     org_id: Optional[str] = None
     messages: List[Any] = Field(default_factory=list)
     agent_id: Optional[str] = None
+    summary: Optional[str] = None
+    message_count: int = 0
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
