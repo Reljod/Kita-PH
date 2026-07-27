@@ -95,15 +95,32 @@ class IngestService(IIngestService):
             return self.get_rag(rag_id)
 
         update_data["updated_at"] = datetime.now(timezone.utc)
-        if "content" in update_data:
-            title = update_data.get("title") or req.title or "Manual Input"
-            update_data["text"] = f"{title}: {update_data['content']}"
-            update_data["heading_to_text"] = f"{title} > {update_data['content']}"
-            update_data["status"] = "pending"
 
         query = {"_id": obj_id}
         if self.agent_id:
             query = {"$and": [{"_id": obj_id}, self._get_agent_filter()]}
+
+        if "title" in update_data or "content" in update_data:
+            # Every read path resolves the title through `heading_text`, and
+            # search runs against `text` / `heading_to_text`. Writing only
+            # `title` left all three stale, so renaming an entry returned 200
+            # and changed nothing the user could see -- and a title-only edit
+            # never reached the search text at all. Rebuild from the effective
+            # values, filling whichever side the request did not supply.
+            existing = self.collection.find_one(query) or {}
+            title = (
+                update_data.get("title")
+                or existing.get("heading_text")
+                or ("Manual Input")
+            )
+            content = update_data.get("content") or existing.get("content") or ""
+
+            update_data["heading_text"] = title
+            update_data["text"] = f"{title}: {content}"
+            update_data["heading_to_text"] = f"{title} > {content}"
+            # The embedding was built from the old text, so it has to be
+            # regenerated before this entry is searchable again.
+            update_data["status"] = "pending"
 
         self.collection.update_one(query, {"$set": update_data})
         return self.get_rag(rag_id)
