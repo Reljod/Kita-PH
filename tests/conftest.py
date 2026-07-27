@@ -160,9 +160,17 @@ def mock_tenant_collection(mock_collection: MagicMock) -> TenantCollection:
 
 @pytest.fixture
 def patched_db(monkeypatch, mongo_client):
-    """Point `app.db.db` at an in-memory Mongo for the duration of a test."""
-    from app.db import db
+    """Point the Database at an in-memory Mongo for the duration of a test.
 
+    The class attributes are what matter: the collection accessors are
+    classmethods reading `cls.db`, so services that call
+    `Database.get_users_collection()` bypass the module-level `db` instance
+    entirely. Both are patched so either access style resolves.
+    """
+    from app.db import Database, db
+
+    monkeypatch.setattr(Database, "client", mongo_client, raising=False)
+    monkeypatch.setattr(Database, "db", mongo_client["kita_test_db"], raising=False)
     monkeypatch.setattr(db, "client", mongo_client, raising=False)
     monkeypatch.setattr(db, "db", mongo_client["kita_test_db"], raising=False)
     return db
