@@ -1664,6 +1664,7 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "fakeredis" },
+    { name = "fastapi-cloud-cli" },
     { name = "freezegun" },
     { name = "mongomock" },
     { name = "pytest" },
@@ -1698,6 +1699,7 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "fakeredis", specifier = ">=2.26.0" },
+    { name = "fastapi-cloud-cli", specifier = ">=0.15.1" },
     { name = "freezegun", specifier = ">=1.5.0" },
     { name = "mongomock", specifier = ">=4.3.0" },
     { name = "pytest", specifier = ">=8.3.0" },
