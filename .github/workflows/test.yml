@@ -11,6 +11,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history: the lint step diffs against the base branch, and a
+          # shallow clone has no merge base for the three-dot range.
+          fetch-depth: 0
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
@@ -19,8 +23,9 @@ jobs:
         # Scoped to the diff on purpose: the tree predates the linter, so a
         # repo-wide sweep would fail every PR on pre-existing findings.
         run: |
-          git fetch --no-tags --depth=1 origin "${{ github.base_ref || 'main' }}"
-          files=$(git diff --name-only --diff-filter=ACM "origin/${{ github.base_ref || 'main' }}"...HEAD -- '*.py')
+          base="${{ github.base_ref || 'main' }}"
+          git fetch --no-tags origin "$base"
+          files=$(git diff --name-only --diff-filter=ACM "origin/$base...HEAD" -- '*.py')
           if [ -n "$files" ]; then
             uv run ruff check --force-exclude $files
             uv run ruff format --check --force-exclude $files
