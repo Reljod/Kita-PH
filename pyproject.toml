@@ -23,3 +23,82 @@ dependencies = [
     "neo4j>=6.1.0",
     "redis>=5.0.0",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.24.0",
+    "pytest-cov>=6.0.0",
+    "pytest-mock>=3.14.0",
+    "mongomock>=4.3.0",
+    "fakeredis>=2.26.0",
+    "respx>=0.22.0",
+    "freezegun>=1.5.0",
+    "ruff>=0.14.0",
+]
+
+[tool.ruff]
+# Pin the rule set explicitly. Ruff's implicit defaults shift between
+# releases, so a developer's system ruff and the project's pinned one
+# disagreed about E402 and the pre-commit gate failed for one but not the
+# other. Naming the rules makes the gate reproducible.
+target-version = "py313"
+
+[tool.ruff.lint]
+# Ruff's own default set: real defects (undefined names, unused imports,
+# syntax errors) rather than style. Deliberately not the full E/I/UP/B
+# sweep — this repo predates the linter, and turning those on would make
+# the pre-commit gate demand a reformat of any legacy file a change
+# happens to touch, burying real review signal in whitespace.
+select = ["E4", "E7", "E9", "F"]
+
+[tool.ruff.lint.per-file-ignores]
+# conftest must set os.environ before any `app.*` import, so its imports
+# genuinely cannot all sit at the top of the file.
+"tests/conftest.py" = ["E402"]
+"tests/e2e/conftest.py" = ["E402"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# The app is run from the repo root (uvicorn main:app), not installed as a
+# package, so the root has to be on sys.path for `import app.*` to resolve.
+pythonpath = ["."]
+# Import mode "importlib" keeps the tests/ tree free of __init__.py files while
+# still allowing same-named modules under different subpackages.
+addopts = [
+    "--strict-markers",
+    "--strict-config",
+    "-ra",
+    "--import-mode=importlib",
+]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+markers = [
+    "slow: tests that take more than a second (excluded from the fast gate)",
+]
+filterwarnings = [
+    "error::DeprecationWarning:app.*",
+]
+
+[tool.coverage.run]
+source = ["app"]
+branch = true
+omit = [
+    # Process entrypoints: exercised by E2E, not importable in isolation without
+    # a live Hatchet broker. Covering these with mocks would assert the mock.
+    "app/workers/run.py",
+    "app/workers/worker.py",
+    "app/workers/scratch/*",
+]
+
+[tool.coverage.report]
+fail_under = 90
+show_missing = true
+skip_covered = false
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "@(abc\\.)?abstractmethod",
+    "if __name__ == .__main__.:",
+    "class .*\\(Protocol\\):",
+]
