@@ -3,6 +3,7 @@ from pymongo import MongoClient
 from pymongo.collection import Collection
 from pymongo.database import Database as MongoDatabase
 
+
 class Database:
     client: MongoClient = None
     db: MongoDatabase = None
@@ -63,9 +64,11 @@ class Database:
     def get_file_parsed_flattened_collection(cls) -> Collection:
         return cls.db["file_parsed_flattened"]
 
+
 db = Database()
 
-from typing import Mapping, Any, Optional
+from typing import Mapping, Any, Optional  # noqa: E402 (kept below `db` to preserve import order)
+
 
 class TenantCollection:
     def __init__(self, collection: Collection, org_id: str):
@@ -122,10 +125,17 @@ class TenantCollection:
             # MongoDB Atlas special stages must be first. Inject org_id filter as second stage.
             pipeline.insert(1, org_match)
         elif "$match" in pipeline[0]:
-            pipeline[0]["$match"]["org_id"] = self.org_id
+            # list() above is a shallow copy, so the caller still owns the stage
+            # dicts. Rebuild the first stage rather than writing through to it:
+            # mutating it would bake this tenant's org_id into a pipeline the
+            # caller may go on to reuse — for another tenant.
+            pipeline[0] = {
+                **pipeline[0],
+                "$match": {**pipeline[0]["$match"], "org_id": self.org_id},
+            }
         else:
             pipeline.insert(0, org_match)
-            
+
         return self._collection.aggregate(pipeline, *args, **kwargs)
 
     def __getattr__(self, name):

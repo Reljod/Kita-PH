@@ -1,0 +1,41 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  unit:
+    name: Unit tests + coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history: the lint step diffs against the base branch, and a
+          # shallow clone has no merge base for the three-dot range.
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --group dev
+      - name: Lint the changed files
+        # Scoped to the diff on purpose: the tree predates the linter, so a
+        # repo-wide sweep would fail every PR on pre-existing findings.
+        run: |
+          base="${{ github.base_ref || 'main' }}"
+          git fetch --no-tags origin "$base"
+          files=$(git diff --name-only --diff-filter=ACM "origin/$base...HEAD" -- '*.py')
+          if [ -n "$files" ]; then
+            uv run ruff check --force-exclude $files
+            uv run ruff format --check --force-exclude $files
+          fi
+      - name: Pytest with the coverage gate
+        # pyproject sets fail_under = 90.
+        run: uv run pytest --cov --cov-report=term-missing --cov-report=xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: api-coverage
+          path: coverage.xml
+          retention-days: 14

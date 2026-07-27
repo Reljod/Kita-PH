@@ -10,12 +10,39 @@ from fastapi import Header
 logger = logging.getLogger("app.api")
 
 STANDARD_RECORD_ATTRS = {
-    'name', 'msg', 'args', 'levelname', 'levelno', 'pathname', 'filename',
-    'module', 'exc_info', 'exc_text', 'stack_info', 'lineno', 'funcName',
-    'created', 'msecs', 'relativeCreated', 'thread', 'threadName',
-    'processName', 'process', 'message', 'org_id', 'user_id', 'request_id',
-    'trace_id', 'client_id'
+    "name",
+    "msg",
+    "args",
+    "levelname",
+    "levelno",
+    "pathname",
+    "filename",
+    "module",
+    "exc_info",
+    "exc_text",
+    "stack_info",
+    "lineno",
+    "funcName",
+    "created",
+    "msecs",
+    "relativeCreated",
+    "thread",
+    "threadName",
+    "processName",
+    "process",
+    "message",
+    "org_id",
+    "user_id",
+    "request_id",
+    "trace_id",
+    "client_id",
+    # Python 3.12 added taskName to every LogRecord. It is a framework field
+    # like the rest of this set, so without it here every line logged from a
+    # coroutine carries a "taskName=Task-55" extra -- and every JSON line
+    # gains a taskName key -- for no diagnostic value.
+    "taskName",
 }
+
 
 def log_tool_call(func):
     """
@@ -30,34 +57,42 @@ def log_tool_call(func):
     @functools.wraps(func)
     async def wrapper(*args, **kwargs):
         tool_name = func.__name__
-        
+
         # Filter inputs to exclude RunContext
         filtered_args = [a for a in args if not isinstance(a, RunContext)]
-        filtered_kwargs = {k: v for k, v in kwargs.items() if not isinstance(v, RunContext)}
-        
+        filtered_kwargs = {
+            k: v for k, v in kwargs.items() if not isinstance(v, RunContext)
+        }
+
         inputs_str = f"args={filtered_args}, kwargs={filtered_kwargs}"
-        truncated_inputs = inputs_str[:250] + "..." if len(inputs_str) > 250 else inputs_str
-        
+        truncated_inputs = (
+            inputs_str[:250] + "..." if len(inputs_str) > 250 else inputs_str
+        )
+
         start_time = time.perf_counter()
-        
-        with logfire.span(f"tool_call:{tool_name}", tool_name=tool_name, inputs=truncated_inputs) as span:
+
+        with logfire.span(
+            f"tool_call:{tool_name}", tool_name=tool_name, inputs=truncated_inputs
+        ) as span:
             logger.info(
                 f"Starting tool call: {tool_name} with {truncated_inputs}",
                 extra={
                     "tool_name": tool_name,
                     "inputs": truncated_inputs,
-                }
+                },
             )
             try:
                 result = await func(*args, **kwargs)
                 duration = time.perf_counter() - start_time
-                
+
                 result_str = str(result)
-                truncated_result = result_str[:250] + "..." if len(result_str) > 250 else result_str
-                
+                truncated_result = (
+                    result_str[:250] + "..." if len(result_str) > 250 else result_str
+                )
+
                 span.set_attribute("duration_seconds", duration)
                 span.set_attribute("status", "success")
-                
+
                 logger.info(
                     f"Tool call {tool_name} completed in {duration:.3f}s",
                     extra={
@@ -65,15 +100,16 @@ def log_tool_call(func):
                         "duration": duration,
                         "status": "success",
                         "result": truncated_result,
-                    }
+                    },
                 )
                 return result
             except Exception as e:
                 duration = time.perf_counter() - start_time
                 span.set_attribute("duration_seconds", duration)
                 span.set_attribute("status", "failed")
-                
+
                 from app.exceptions.base import KitaException
+
                 if isinstance(e, KitaException):
                     wrapped_error = e
                 else:
@@ -86,28 +122,56 @@ def log_tool_call(func):
                         ToolParseError,
                         ToolWebSearchError,
                         ToolAgentCreationError,
-                        ToolException
+                        ToolException,
                     )
+
                     err_msg = str(e)
                     name_lower = tool_name.lower()
                     if "delegate" in name_lower:
-                        wrapped_error = ToolDelegationError(f"Delegation tool '{tool_name}' failed: {err_msg}", details={"error": err_msg})
+                        wrapped_error = ToolDelegationError(
+                            f"Delegation tool '{tool_name}' failed: {err_msg}",
+                            details={"error": err_msg},
+                        )
                     elif "memory" in name_lower or "rag_search" in name_lower:
-                        wrapped_error = ToolMemoryError(f"Memory tool '{tool_name}' failed: {err_msg}", details={"error": err_msg})
+                        wrapped_error = ToolMemoryError(
+                            f"Memory tool '{tool_name}' failed: {err_msg}",
+                            details={"error": err_msg},
+                        )
                     elif "file" in name_lower:
-                        wrapped_error = ToolFileError(f"File tool '{tool_name}' failed: {err_msg}", details={"error": err_msg})
+                        wrapped_error = ToolFileError(
+                            f"File tool '{tool_name}' failed: {err_msg}",
+                            details={"error": err_msg},
+                        )
                     elif "graph_rag" in name_lower:
-                        wrapped_error = ToolGraphRagError(f"Graph RAG tool '{tool_name}' failed: {err_msg}", details={"error": err_msg})
+                        wrapped_error = ToolGraphRagError(
+                            f"Graph RAG tool '{tool_name}' failed: {err_msg}",
+                            details={"error": err_msg},
+                        )
                     elif "llm" in name_lower:
-                        wrapped_error = ToolLlmError(f"LLM tool '{tool_name}' failed: {err_msg}", details={"error": err_msg})
+                        wrapped_error = ToolLlmError(
+                            f"LLM tool '{tool_name}' failed: {err_msg}",
+                            details={"error": err_msg},
+                        )
                     elif "parse" in name_lower:
-                        wrapped_error = ToolParseError(f"Parse tool '{tool_name}' failed: {err_msg}", details={"error": err_msg})
+                        wrapped_error = ToolParseError(
+                            f"Parse tool '{tool_name}' failed: {err_msg}",
+                            details={"error": err_msg},
+                        )
                     elif "web_search" in name_lower:
-                        wrapped_error = ToolWebSearchError(f"Web search tool '{tool_name}' failed: {err_msg}", details={"error": err_msg})
+                        wrapped_error = ToolWebSearchError(
+                            f"Web search tool '{tool_name}' failed: {err_msg}",
+                            details={"error": err_msg},
+                        )
                     elif "agent_creation" in name_lower or "agent_tools" in name_lower:
-                        wrapped_error = ToolAgentCreationError(f"Agent management tool '{tool_name}' failed: {err_msg}", details={"error": err_msg})
+                        wrapped_error = ToolAgentCreationError(
+                            f"Agent management tool '{tool_name}' failed: {err_msg}",
+                            details={"error": err_msg},
+                        )
                     else:
-                        wrapped_error = ToolException(f"Tool '{tool_name}' failed: {err_msg}", details={"error": err_msg})
+                        wrapped_error = ToolException(
+                            f"Tool '{tool_name}' failed: {err_msg}",
+                            details={"error": err_msg},
+                        )
 
                 span.set_attribute("error", wrapped_error.message)
                 logger.error(
@@ -118,17 +182,30 @@ def log_tool_call(func):
                         "status": "failed",
                         "error": wrapped_error.to_dict(),
                     },
-                    exc_info=True
+                    exc_info=True,
                 )
                 raise wrapped_error
+
     return wrapper
 
+
 # Define ContextVars for storing request-scoped tracing and authentication context
-ctx_org_id: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("org_id", default=None)
-ctx_user_id: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("user_id", default=None)
-ctx_request_id: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("request_id", default=None)
-ctx_trace_id: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("trace_id", default=None)
-ctx_client_id: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("client_id", default=None)
+ctx_org_id: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+    "org_id", default=None
+)
+ctx_user_id: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+    "user_id", default=None
+)
+ctx_request_id: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+    "request_id", default=None
+)
+ctx_trace_id: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+    "trace_id", default=None
+)
+ctx_client_id: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+    "client_id", default=None
+)
+
 
 def set_logging_context(
     org_id: Optional[str] = None,
@@ -150,6 +227,7 @@ def set_logging_context(
         ctx_client_id.set(client_id)
 
     from opentelemetry import trace
+
     current_span = trace.get_current_span()
     if current_span and current_span.is_recording():
         if org_id is not None:
@@ -163,6 +241,7 @@ def set_logging_context(
         if client_id is not None:
             current_span.set_attribute("client_id", client_id)
 
+
 def clear_logging_context():
     """Clears all stored context variables."""
     ctx_org_id.set(None)
@@ -171,6 +250,7 @@ def clear_logging_context():
     ctx_trace_id.set(None)
     ctx_client_id.set(None)
 
+
 class ContextFilter(logging.Filter):
     """
     Filter that injects request-scoped attributes (org_id, user_id, request_id, trace_id, client_id)
@@ -178,6 +258,7 @@ class ContextFilter(logging.Filter):
     This ensures that downstream handlers like Logfire can capture these as structured attributes
     and include them in their telemetry.
     """
+
     def filter(self, record: logging.LogRecord) -> bool:
         org_id = ctx_org_id.get()
         user_id = ctx_user_id.get()
@@ -199,11 +280,13 @@ class ContextFilter(logging.Filter):
 
         return True
 
+
 class LogFormatter(logging.Formatter):
     """
     Custom formatter that formats LogRecords.
     Supports structured JSON layout (production style) or clean text console layout.
     """
+
     def __init__(self, use_json: bool = False):
         super().__init__()
         self.use_json = use_json
@@ -217,13 +300,14 @@ class LogFormatter(logging.Formatter):
 
         # Extract extra custom attributes
         extras = {
-            k: v for k, v in record.__dict__.items()
-            if k not in STANDARD_RECORD_ATTRS
+            k: v for k, v in record.__dict__.items() if k not in STANDARD_RECORD_ATTRS
         }
 
         if self.use_json:
             log_data = {
-                "timestamp": datetime.fromtimestamp(record.created, timezone.utc).isoformat(),
+                "timestamp": datetime.fromtimestamp(
+                    record.created, timezone.utc
+                ).isoformat(),
                 "level": record.levelname,
                 "logger": record.name,
                 "org_id": None if org_id == "-" else org_id,
@@ -239,22 +323,23 @@ class LogFormatter(logging.Formatter):
                 log_data["error"] = str(record.error)
             else:
                 log_data["error"] = None
-            
+
             # Merge extra keys
             log_data.update(extras)
-                
+
             return json.dumps(log_data)
         else:
             timestamp = datetime.fromtimestamp(record.created, timezone.utc).isoformat()
             exc_str = ""
             if record.exc_info:
                 exc_str = f"\n{self.formatException(record.exc_info)}"
-            
+
             extra_str = ""
             if extras:
                 extra_str = " [" + " ".join(f"{k}={v}" for k, v in extras.items()) + "]"
-                
+
             return f"{timestamp} [{record.levelname}] {record.name}: {record.getMessage()}{extra_str}{exc_str}"
+
 
 def setup_logging():
     """Configures root logging with custom LogFormatter, handling Logfire integration if configured."""
@@ -262,10 +347,10 @@ def setup_logging():
     if log_level_str not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
         log_level_str = "INFO"
     level = getattr(logging, log_level_str)
-    
+
     log_format = os.getenv("LOG_FORMAT", "text").lower()
     use_json = log_format == "json"
-    
+
     # Instantiate the ContextFilter
     context_filter = ContextFilter()
 
@@ -274,29 +359,26 @@ def setup_logging():
     console_handler.setFormatter(LogFormatter(use_json=use_json))
     console_handler.setLevel(level)
     console_handler.addFilter(context_filter)
-    
+
     handlers = [console_handler]
-    
+
     # Check if Logfire Logging Handler is available
     try:
         import logfire
+
         logfire_handler = logfire.LogfireLoggingHandler()
         logfire_handler.addFilter(context_filter)
         handlers.append(logfire_handler)
     except ImportError:
         pass
-        
-    logging.basicConfig(
-        handlers=handlers,
-        level=level,
-        force=True
-    )
-    
+
+    logging.basicConfig(handlers=handlers, level=level, force=True)
+
     # Ensure uvicorn and other server loggers propagate to root handler to get formatting
     for logger_name in ("uvicorn", "uvicorn.error", "fastapi"):
-        l = logging.getLogger(logger_name)
-        l.handlers = []
-        l.propagate = True
+        server_logger = logging.getLogger(logger_name)
+        server_logger.handlers = []
+        server_logger.propagate = True
 
     # Disable uvicorn access logging to prevent duplicate requests logs, since logfire handles request tracing
     uvicorn_access = logging.getLogger("uvicorn.access")
@@ -304,12 +386,14 @@ def setup_logging():
     uvicorn_access.propagate = False
     uvicorn_access.setLevel(logging.WARNING)
 
+
 class CorrelationIdMiddleware:
     """
     Pure ASGI middleware that manages the request-response correlation ID lifecycle.
     Unlike Starlette's BaseHTTPMiddleware, this preserves Python contextvars perfectly
     across the entire request task context.
     """
+
     def __init__(self, app):
         self.app = app
 
@@ -322,13 +406,13 @@ class CorrelationIdMiddleware:
 
         # Parse headers from ASGI scope (names are lowercase bytes)
         headers = {k.lower(): v for k, v in scope.get("headers", [])}
-        
+
         req_id_bytes = headers.get(b"x-request-id", b"")
         req_id = req_id_bytes.decode("latin1") if req_id_bytes else str(uuid.uuid4())
-        
+
         tr_id_bytes = headers.get(b"x-trace-id", b"")
         tr_id = tr_id_bytes.decode("latin1") if tr_id_bytes else str(uuid.uuid4())
-        
+
         client_id_bytes = headers.get(b"x-client-id", b"")
         client_id = client_id_bytes.decode("latin1") if client_id_bytes else None
 
@@ -340,6 +424,7 @@ class CorrelationIdMiddleware:
         token_org = ctx_org_id.set(None)
 
         from opentelemetry import trace
+
         current_span = trace.get_current_span()
         if current_span and current_span.is_recording():
             current_span.set_attribute("request_id", req_id)
@@ -364,7 +449,7 @@ class CorrelationIdMiddleware:
             duration = time.perf_counter() - start_time
             method = scope.get("method", "")
             path = scope.get("path", "")
-            
+
             if scope["type"] == "http":
                 logger.info(
                     f"HTTP Request: {method} {path} -> {status_code[0]} in {duration:.3f}s",
@@ -373,7 +458,7 @@ class CorrelationIdMiddleware:
                         "http_path": path,
                         "status_code": status_code[0],
                         "duration": duration,
-                    }
+                    },
                 )
             else:
                 logger.info(
@@ -381,7 +466,7 @@ class CorrelationIdMiddleware:
                     extra={
                         "http_path": path,
                         "duration": duration,
-                    }
+                    },
                 )
 
             ctx_request_id.reset(token_req)
@@ -389,6 +474,7 @@ class CorrelationIdMiddleware:
             ctx_client_id.reset(token_client)
             ctx_user_id.reset(token_user)
             ctx_org_id.reset(token_org)
+
 
 async def get_global_headers(
     x_request_id: Optional[str] = Header(None, alias="x-request-id"),
@@ -401,8 +487,6 @@ async def get_global_headers(
     Synchronizes incoming header values to contextvars and OpenTelemetry span attributes.
     """
     set_logging_context(
-        request_id=x_request_id,
-        trace_id=x_trace_id,
-        client_id=x_client_id
+        request_id=x_request_id, trace_id=x_trace_id, client_id=x_client_id
     )
     return x_request_id, x_trace_id, x_api_key, x_client_id

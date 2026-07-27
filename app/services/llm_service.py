@@ -1,25 +1,21 @@
 import os
 import logging
 from bson import ObjectId
-from typing import List, Optional, Dict, Any, Protocol
+from typing import List, Optional, Dict, Protocol
 from openai import AsyncOpenAI
 import logfire
 
 logger = logging.getLogger(__name__)
 
-from app.models.llm import LlmCreateRequest, LlmResponse, LlmDocument
-from app.db import TenantCollection
+from app.models.llm import LlmCreateRequest, LlmResponse, LlmDocument  # noqa: E402
+from app.db import TenantCollection  # noqa: E402
 
 
 class ILlmService(Protocol):
-    def add_llm(self, req: LlmCreateRequest) -> LlmResponse:
-        ...
-    def list_llms(self) -> List[LlmResponse]:
-        ...
-    def get_llm(self, llm_id: str) -> Optional[LlmResponse]:
-        ...
-    def delete_llm(self, llm_id: str) -> bool:
-        ...
+    def add_llm(self, req: LlmCreateRequest) -> LlmResponse: ...
+    def list_llms(self) -> List[LlmResponse]: ...
+    def get_llm(self, llm_id: str) -> Optional[LlmResponse]: ...
+    def delete_llm(self, llm_id: str) -> bool: ...
     async def run(
         self,
         model_name: str,
@@ -29,9 +25,8 @@ class ILlmService(Protocol):
         agent_id: str = "KitaAgent",
         json_mode: bool = False,
         temperature: float = 0.0,
-        max_tokens: Optional[int] = None
-    ) -> str:
-        ...
+        max_tokens: Optional[int] = None,
+    ) -> str: ...
 
 
 def format_llm_response(doc: dict) -> LlmResponse:
@@ -41,7 +36,7 @@ def format_llm_response(doc: dict) -> LlmResponse:
         model=doc["model"],
         provider=doc["provider"],
         created_at=doc["created_at"],
-        updated_at=doc["updated_at"]
+        updated_at=doc["updated_at"],
     )
 
 
@@ -50,15 +45,11 @@ class LlmService(ILlmService):
         self.collection = collection
         self.client = AsyncOpenAI(
             api_key=os.getenv("OPENROUTER_API_KEY", ""),
-            base_url="https://openrouter.ai/api/v1"
+            base_url="https://openrouter.ai/api/v1",
         )
 
     def add_llm(self, req: LlmCreateRequest) -> LlmResponse:
-        new_llm = LlmDocument(
-            name=req.name,
-            model=req.model,
-            provider=req.provider
-        )
+        new_llm = LlmDocument(name=req.name, model=req.model, provider=req.provider)
         doc = new_llm.model_dump()
         res = self.collection.insert_one(doc)
         doc["_id"] = res.inserted_id
@@ -66,14 +57,14 @@ class LlmService(ILlmService):
 
     def list_llms(self) -> List[LlmResponse]:
         llms = self.collection.find().sort("created_at", -1)
-        return [format_llm_response(l) for l in llms]
+        return [format_llm_response(doc) for doc in llms]
 
     def get_llm(self, llm_id: str) -> Optional[LlmResponse]:
         try:
             obj_id = ObjectId(llm_id)
         except Exception:
             raise ValueError("Invalid LLM ID")
-            
+
         doc = self.collection.find_one({"_id": obj_id})
         if not doc:
             return None
@@ -84,7 +75,7 @@ class LlmService(ILlmService):
             obj_id = ObjectId(llm_id)
         except Exception:
             raise ValueError("Invalid LLM ID")
-            
+
         res = self.collection.delete_one({"_id": obj_id})
         return res.deleted_count > 0
 
@@ -97,20 +88,30 @@ class LlmService(ILlmService):
         agent_id: str = "KitaAgent",
         json_mode: bool = False,
         temperature: float = 0.0,
-        max_tokens: Optional[int] = None
+        max_tokens: Optional[int] = None,
     ) -> str:
         if status_key and step:
             try:
                 from app.dependencies.services import get_services
+
                 services = get_services(self.collection.org_id)
-                await services.agent_status_service.update_step(status_key, step, agent_id)
+                await services.agent_status_service.update_step(
+                    status_key, step, agent_id
+                )
             except Exception as e:
-                logfire.error("Failed to update status step in LLM run: {error}", error=str(e))
+                logfire.error(
+                    "Failed to update status step in LLM run: {error}", error=str(e)
+                )
 
         import time
+
         start_time = time.perf_counter()
         prompt_preview = str(messages[-1].get("content") if messages else "")
-        truncated_prompt = prompt_preview[:150] + "..." if len(prompt_preview) > 150 else prompt_preview
+        truncated_prompt = (
+            prompt_preview[:150] + "..."
+            if len(prompt_preview) > 150
+            else prompt_preview
+        )
 
         response_format = {"type": "json_object"} if json_mode else None
         try:
@@ -119,7 +120,7 @@ class LlmService(ILlmService):
                 messages=messages,
                 response_format=response_format,
                 temperature=temperature,
-                max_tokens=max_tokens
+                max_tokens=max_tokens,
             )
             duration = time.perf_counter() - start_time
             usage = getattr(chat_completion, "usage", None)
@@ -137,9 +138,14 @@ class LlmService(ILlmService):
                     "completion_tokens": completion_tokens,
                     "total_tokens": total_tokens,
                     "temperature": temperature,
-                }
+                },
             )
-            return chat_completion.choices[0].message.content.strip()
+            # `content` is None whenever the model returns only tool calls or
+            # the provider trips a content filter — both are ordinary
+            # responses, not transport failures, so don't turn them into an
+            # AttributeError the caller sees as a 500.
+            content = chat_completion.choices[0].message.content
+            return content.strip() if content else ""
         except Exception as e:
             duration = time.perf_counter() - start_time
             logger.error(
@@ -148,9 +154,8 @@ class LlmService(ILlmService):
                     "model": model_name,
                     "prompt": truncated_prompt,
                     "duration": duration,
-                    "error": str(e)
+                    "error": str(e),
                 },
-                exc_info=True
+                exc_info=True,
             )
             raise e
-

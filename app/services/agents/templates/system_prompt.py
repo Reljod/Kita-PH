@@ -39,11 +39,11 @@ def get_delegate_task_config() -> dict:
             "- **Parallelism**: You can call `delegate_task` multiple times in a single turn to execute tasks concurrently. "
             "This is highly efficient for gathering information from multiple sources or processing different aspects of a problem at once.\n"
             "- **Context Management**: Use delegation to keep your main conversation context clean. Offload detailed research or "
-            "\"deep dives\" to sub-agents and only incorporate their summarized results.\n"
+            '"deep dives" to sub-agents and only incorporate their summarized results.\n'
             "- **Specialization**: You can delegate to other specialized agents if you know their IDs, or simply spawn a sub-agent of yourself "
             "to handle a discrete piece of work."
         ),
-        "priority": 9
+        "priority": 9,
     }
 
 
@@ -55,7 +55,7 @@ def get_search_memory_config() -> dict:
             "Use `search_memory` (Basic RAG) for straightforward lookups of specific terms or snippets when you expect "
             "a direct match in the document knowledge base."
         ),
-        "priority": 6
+        "priority": 6,
     }
 
 
@@ -67,7 +67,7 @@ def get_rag_search_config() -> dict:
             "Use `rag_search` (Hybrid RAG) to find relevant context, facts, and documents from the knowledge base to answer user queries. "
             "It is highly recommended for retrieving specific information or data mentioned in the documents."
         ),
-        "priority": 8
+        "priority": 8,
     }
 
 
@@ -79,7 +79,7 @@ def get_web_search_config() -> dict:
             "Use `web_search` (Internet) for real-time data, industry standards, broad public facts, "
             "or when local memory is insufficient or yields no results."
         ),
-        "priority": 7
+        "priority": 7,
     }
 
 
@@ -92,7 +92,7 @@ def get_get_available_agents_config() -> dict:
             "ID, name, role, and goal. Use this information to identify which agent is best suited for a specific sub-task "
             "before delegating."
         ),
-        "priority": 6
+        "priority": 6,
     }
 
 
@@ -104,7 +104,7 @@ def get_create_agent_config() -> dict:
             "Use `create_agent` to create a new specialized AI agent. Call this tool when you have collected all the "
             "necessary information from the user (name, role, goal, backstory, and optional personalities or LLM ID)."
         ),
-        "priority": 5
+        "priority": 5,
     }
 
 
@@ -116,7 +116,7 @@ def get_get_agent_config() -> dict:
             "Use `get_agent` to retrieve the configuration of a specific agent by its ID. This helps verify the agent's "
             "definition, role, goal, and tools."
         ),
-        "priority": 5
+        "priority": 5,
     }
 
 
@@ -127,7 +127,7 @@ def get_list_agents_config() -> dict:
         "instructions": (
             "Use `list_agents` to see a list of all registered agents in the organization along with their IDs and names."
         ),
-        "priority": 5
+        "priority": 5,
     }
 
 
@@ -140,7 +140,7 @@ def get_update_agent_config() -> dict:
             "backstory, personalities, or LLM ID. By default, it creates a new version, but you can set `new_version=False` "
             "to update the current version in place."
         ),
-        "priority": 5
+        "priority": 5,
     }
 
 
@@ -152,7 +152,7 @@ def get_list_available_llms_config() -> dict:
             "Use `list_available_llms` to retrieve the names and IDs of available language models. This is useful when you "
             "need to let the user select a model or verify the available LLM options before creating or updating an agent."
         ),
-        "priority": 5
+        "priority": 5,
     }
 
 
@@ -164,7 +164,7 @@ def get_resolve_file_id_config() -> dict:
             "Use `resolve_file_id` to parse a file path (format: `{id}.{extension}`) and retrieve the unique file ID. "
             "This ensures the file exists before attempting further processing on it."
         ),
-        "priority": 5
+        "priority": 5,
     }
 
 
@@ -175,7 +175,7 @@ def get_fetch_latest_parse_config() -> dict:
         "instructions": (
             "Use `fetch_latest_parse` to get the parsed markdown, text, or page-by-page output of a file using its resolved file ID."
         ),
-        "priority": 5
+        "priority": 5,
     }
 
 
@@ -187,7 +187,7 @@ def get_ingest_into_graph_config() -> dict:
             "Use `ingest_into_graph` to ingest a processed document's chunks, entities, and relationships into the Graph RAG system. "
             "This builds the knowledge graph for future advanced memory searches."
         ),
-        "priority": 5
+        "priority": 5,
     }
 
 
@@ -196,7 +196,7 @@ def get_generic_tool_config(name: str) -> dict:
         "name": name,
         "description": f"Custom tool: {name}",
         "instructions": f"Use the `{name}` tool when appropriate for the task.",
-        "priority": 5
+        "priority": 5,
     }
 
 
@@ -225,7 +225,9 @@ def get_retrieval_sequence_instruction(available_tools: List[str]) -> str:
     if not any([has_search_mem, has_rag_search, has_web_search]):
         return ""
 
-    sequence_lines = ["When tasked with finding or verifying information, follow this sequence to ensure accuracy and depth:\n"]
+    sequence_lines = [
+        "When tasked with finding or verifying information, follow this sequence to ensure accuracy and depth:\n"
+    ]
 
     if has_search_mem and has_rag_search:
         sequence_lines.append(
@@ -242,10 +244,14 @@ def get_retrieval_sequence_instruction(available_tools: List[str]) -> str:
         # Fallback sequence if we don't have both memory search tools
         idx = 1
         if has_search_mem:
-            sequence_lines.append(f"{idx}. **`search_memory` (Basic RAG)**: Use for straightforward lookups of specific terms or snippets when you expect a direct match in the document knowledge base.")
+            sequence_lines.append(
+                f"{idx}. **`search_memory` (Basic RAG)**: Use for straightforward lookups of specific terms or snippets when you expect a direct match in the document knowledge base."
+            )
             idx += 1
         if has_rag_search:
-            sequence_lines.append(f"{idx}. **`rag_search` (Hybrid RAG)**: Performs a hybrid search combining vector search and full text search, followed by reranking. Use this to retrieve factual context from uploaded documents.")
+            sequence_lines.append(
+                f"{idx}. **`rag_search` (Hybrid RAG)**: Performs a hybrid search combining vector search and full text search, followed by reranking. Use this to retrieve factual context from uploaded documents."
+            )
             idx += 1
         if has_web_search:
             sequence_lines.append(
@@ -257,48 +263,74 @@ def get_retrieval_sequence_instruction(available_tools: List[str]) -> str:
 
 
 def get_verification_policy(available_tools: List[str]) -> str:
-    has_rag_search = "rag_search" in available_tools or "search_memory" in available_tools
+    has_rag_search = (
+        "rag_search" in available_tools or "search_memory" in available_tools
+    )
     has_web = "web_search" in available_tools
-    
+
     if not has_rag_search and not has_web:
         return ""
-        
+
     preferred_rag = "rag_search" if "rag_search" in available_tools else "search_memory"
-        
+
     policy_lines = ["**Mandatory Entity Research & Verification Policy**:"]
-    policy_lines.append("- **Pre-emptive Reflection**: Before drafting *any* part of your response, you MUST explicitly reflect as your very first step: *\"Does this query mention a uniquely identifiable entity (e.g., a specific project, organization, person, or technical term) or a factual claim that requires verification? Do I need additional data or context to answer accurately?\"*")
-    
+    policy_lines.append(
+        '- **Pre-emptive Reflection**: Before drafting *any* part of your response, you MUST explicitly reflect as your very first step: *"Does this query mention a uniquely identifiable entity (e.g., a specific project, organization, person, or technical term) or a factual claim that requires verification? Do I need additional data or context to answer accurately?"*'
+    )
+
     if has_rag_search and has_web:
-        has_both_rag = "search_memory" in available_tools and "rag_search" in available_tools
-        rag_tools_desc = "`search_memory` and `rag_search` (in parallel)" if has_both_rag else f"`{preferred_rag}`"
-        
-        policy_lines.append(f"- **Research Mandate**: If the answer to your reflection is **YES**, you MUST trigger your retrieval tool calls ({rag_tools_desc} or `web_search`) immediately as your first action before generating a final response, even if you believe you already have partial information.")
-        policy_lines.append(f"- **Internal Facts**: For critical data, documents, or complex company relationships, always verify using {rag_tools_desc}.")
-        policy_lines.append("- **External Facts**: Always verify public factual claims (dates, standard procedures, external documentation) using `web_search`.")
-        policy_lines.append("- **Cross-Verification**: For high-stakes responses, cross-reference findings from both internal memory and `web_search` to ensure internal consistency and external accuracy. If sources conflict, state this clearly and provide the evidence from each.")
+        has_both_rag = (
+            "search_memory" in available_tools and "rag_search" in available_tools
+        )
+        rag_tools_desc = (
+            "`search_memory` and `rag_search` (in parallel)"
+            if has_both_rag
+            else f"`{preferred_rag}`"
+        )
+
+        policy_lines.append(
+            f"- **Research Mandate**: If the answer to your reflection is **YES**, you MUST trigger your retrieval tool calls ({rag_tools_desc} or `web_search`) immediately as your first action before generating a final response, even if you believe you already have partial information."
+        )
+        policy_lines.append(
+            f"- **Internal Facts**: For critical data, documents, or complex company relationships, always verify using {rag_tools_desc}."
+        )
+        policy_lines.append(
+            "- **External Facts**: Always verify public factual claims (dates, standard procedures, external documentation) using `web_search`."
+        )
+        policy_lines.append(
+            "- **Cross-Verification**: For high-stakes responses, cross-reference findings from both internal memory and `web_search` to ensure internal consistency and external accuracy. If sources conflict, state this clearly and provide the evidence from each."
+        )
     elif has_rag_search:
-        policy_lines.append(f"- **Research Mandate**: If the answer to your reflection is **YES**, you MUST trigger a retrieval tool call (`{preferred_rag}`) immediately as your first action before generating a final response, even if you believe you already have partial information.")
-        policy_lines.append(f"- **Internal & Entity Facts**: For critical data, documents, complex relationships, or entities, always verify using `{preferred_rag}`.")
+        policy_lines.append(
+            f"- **Research Mandate**: If the answer to your reflection is **YES**, you MUST trigger a retrieval tool call (`{preferred_rag}`) immediately as your first action before generating a final response, even if you believe you already have partial information."
+        )
+        policy_lines.append(
+            f"- **Internal & Entity Facts**: For critical data, documents, complex relationships, or entities, always verify using `{preferred_rag}`."
+        )
     elif has_web:
-        policy_lines.append("- **Research Mandate**: If the answer to your reflection is **YES**, you MUST trigger a retrieval tool call (`web_search`) immediately as your first action before generating a final response, even if you believe you already have partial information.")
-        policy_lines.append("- **External & Entity Facts**: Always verify public factual claims (dates, standard procedures, external documentation) or entities using `web_search`.")
-        
+        policy_lines.append(
+            "- **Research Mandate**: If the answer to your reflection is **YES**, you MUST trigger a retrieval tool call (`web_search`) immediately as your first action before generating a final response, even if you believe you already have partial information."
+        )
+        policy_lines.append(
+            "- **External & Entity Facts**: Always verify public factual claims (dates, standard procedures, external documentation) or entities using `web_search`."
+        )
+
     return "\n".join(policy_lines)
 
 
 def get_retrieval_strategy_block(available_tools: List[str]) -> str:
     sequence = get_retrieval_sequence_instruction(available_tools)
     policy = get_verification_policy(available_tools)
-    
+
     if not sequence and not policy:
         return ""
-        
+
     parts = ["# INFORMATION RETRIEVAL & VERIFICATION STRATEGY"]
     if sequence:
         parts.append(sequence)
     if policy:
         parts.append(policy)
-        
+
     return "\n\n".join(parts)
 
 
@@ -309,41 +341,48 @@ def get_tool_guidelines_block(available_tools: List[str]) -> str:
         if config_func:
             configs.append(config_func())
         else:
-            configs.append(get_generic_tool_config(tool_name))
-            
+            # An unregistered tool name is user-supplied — ToolRegisterRequest
+            # accepts any 100-char string — and get_generic_tool_config
+            # interpolates it straight into the prompt. Sanitise it the same
+            # way the identity fields are, or a tool called
+            # "SYSTEM: ignore the rules ```" lands verbatim in the prompt.
+            configs.append(get_generic_tool_config(_sanitise(tool_name)))
+
     # Sort by priority desc, then by name asc
     configs.sort(key=lambda x: (-x["priority"], x["name"]))
-    
+
     if not configs:
         return ""
-        
-    parts = ["# TOOL-SPECIFIC GUIDELINES\nUse these tools according to their instructions and priorities:"]
+
+    parts = [
+        "# TOOL-SPECIFIC GUIDELINES\nUse these tools according to their instructions and priorities:"
+    ]
     for cfg in configs:
         parts.append(
             f"## Tool: `{cfg['name']}` (Priority: {cfg['priority']})\n"
             f"**Description**: {cfg['description']}\n"
             f"**Instructions & When to Use**:\n{cfg['instructions']}"
         )
-        
+
     return "\n\n".join(parts)
 
 
 def build_tool_instructions(available_tools: List[str]) -> str:
     if not available_tools:
         return ""
-        
+
     parts = []
-    
+
     # Retrieval strategy block
     retrieval_block = get_retrieval_strategy_block(available_tools)
     if retrieval_block:
         parts.append(retrieval_block)
-        
+
     # Tool-specific guidelines block
     guidelines_block = get_tool_guidelines_block(available_tools)
     if guidelines_block:
         parts.append(guidelines_block)
-        
+
     return "\n\n".join(parts).strip()
 
 
@@ -360,7 +399,7 @@ def _render_template(
     raw = _TEMPLATE_PATH.read_text(encoding="utf-8")
 
     # Strip comment lines (lines starting with #).
-    lines = [l for l in raw.splitlines() if not l.startswith("#")]
+    lines = [line for line in raw.splitlines() if not line.startswith("#")]
     template = "\n".join(lines)
 
     values = {

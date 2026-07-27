@@ -1,5 +1,5 @@
-import asyncio
 import os
+import re
 import httpx
 import logging
 from datetime import datetime, timezone
@@ -9,6 +9,7 @@ from app.models.rag import RagCreateRequest, RagUpdateRequest, RagResponse, RagD
 from app.db import TenantCollection
 
 from app.exceptions import MemoryNotFoundError
+
 logger = logging.getLogger(__name__)
 
 EMBEDDING_MODEL = "perplexity/pplx-embed-v1-0.6b"
@@ -18,6 +19,7 @@ OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 def _get_openrouter_client():
     from openai import AsyncOpenAI
+
     return AsyncOpenAI(
         api_key=os.getenv("OPENROUTER_API_KEY", ""),
         base_url=OPENROUTER_BASE_URL,
@@ -40,8 +42,16 @@ async def _rerank(query: str, documents: list[str], top_n: int) -> list:
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.post(
                 f"{OPENROUTER_BASE_URL}/rerank",
-                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                json={"model": RERANK_MODEL, "query": query, "documents": documents, "top_n": top_n},
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": RERANK_MODEL,
+                    "query": query,
+                    "documents": documents,
+                    "top_n": top_n,
+                },
             )
             response.raise_for_status()
             return response.json().get("results", [])
@@ -49,21 +59,38 @@ async def _rerank(query: str, documents: list[str], top_n: int) -> list:
         print(f"Reranking API error: {e}")
         return []
 
+
 class IRagService(Protocol):
-    async def add_rag(self, req: RagCreateRequest) -> RagResponse:
-        ...
-    async def edit_rag(self, rag_id: str, req: RagUpdateRequest, agent_id: Optional[str] = None) -> RagResponse:
-        ...
-    async def delete_rag(self, rag_id: str, agent_id: Optional[str] = None) -> bool:
-        ...
-    def get_rag(self, rag_id: str, agent_id: Optional[str] = None) -> RagResponse:
-        ...
-    def get_all_rags(self, agent_id: Optional[str] = None) -> List[RagResponse]:
-        ...
-    async def update_embedding(self, rag_id: str):
-        ...
-    async def search(self, query: str, limit: int = 5, agent_id: Optional[str] = None) -> List[RagResponse]:
-        ...
+    async def add_rag(self, req: RagCreateRequest) -> RagResponse: ...
+    async def edit_rag(
+        self, rag_id: str, req: RagUpdateRequest, agent_id: Optional[str] = None
+    ) -> RagResponse: ...
+    async def delete_rag(self, rag_id: str, agent_id: Optional[str] = None) -> bool: ...
+    def get_rag(self, rag_id: str, agent_id: Optional[str] = None) -> RagResponse: ...
+    def get_all_rags(self, agent_id: Optional[str] = None) -> List[RagResponse]: ...
+    async def update_embedding(self, rag_id: str): ...
+    async def search(
+        self, query: str, limit: int = 5, agent_id: Optional[str] = None
+    ) -> List[RagResponse]: ...
+
+
+def _as_datetime(value: Any) -> datetime:
+    """Coerce a stored timestamp, falling back to now on anything unparseable.
+
+    `search` already anticipates string timestamps -- documents written by the
+    ingest workers and by older migrations carry them -- but a value pydantic
+    cannot parse raised out of RagResponse and took down the whole listing
+    rather than the single row that was malformed.
+    """
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            pass
+    return datetime.now(timezone.utc)
+
 
 def format_rag_response(doc: Dict[str, Any]) -> RagResponse:
     return RagResponse(
@@ -72,15 +99,15 @@ def format_rag_response(doc: Dict[str, Any]) -> RagResponse:
         content=doc["content"],
         status=doc.get("status", "pending"),
         agent_id=doc.get("agent_id"),
-        created_at=doc["created_at"],
-        updated_at=doc["updated_at"],
+        created_at=_as_datetime(doc["created_at"]),
+        updated_at=_as_datetime(doc["updated_at"]),
         question=doc.get("question"),
         answer=doc.get("answer"),
-        original_content=doc.get("original_content")
+        original_content=doc.get("original_content"),
     )
 
-class MongoVectorDbRagService(IRagService):
 
+class MongoVectorDbRagService(IRagService):
     def __init__(self, collection: TenantCollection):
         self.collection = collection
 
@@ -88,20 +115,28 @@ class MongoVectorDbRagService(IRagService):
         """Returns a MongoDB filter query matching this agent's base_id, versioned id, or None."""
         if not agent_id:
             return {}
-            
+
         from app.models.agent import parse_agent_id
+
         base_id = parse_agent_id(agent_id)[0]
-        
+
+        # re.escape because agent_id reaches here straight from the client's
+        # `x-agent-id` header. Interpolated raw, an id of ".*" produced
+        # "^.*(-v\d+)?$" -- a filter matching every agent, so the caller read
+        # (and could edit or delete) every agent's memories in the
+        # organization instead of its own. A backtracking pattern would also
+        # be evaluated server-side by Mongo.
         return {
             "$or": [
                 {"agent_id": agent_id},
                 {"agent_id": base_id},
-                {"agent_id": {"$regex": f"^{base_id}(-v\\d+)?$"}}
+                {"agent_id": {"$regex": f"^{re.escape(base_id)}(-v\\d+)?$"}},
             ]
         }
 
     async def add_rag(self, req: RagCreateRequest) -> RagResponse:
         from app.models.agent import parse_agent_id
+
         raw_agent = req.agent_id
         agent_id = parse_agent_id(raw_agent)[0] if raw_agent else None
 
@@ -110,14 +145,16 @@ class MongoVectorDbRagService(IRagService):
             content=req.content,
             original_content=req.content,
             agent_id=agent_id,
-            status="pending"
+            status="pending",
         )
         doc = new_rag.model_dump()
         res = self.collection.insert_one(doc)
         doc["_id"] = res.inserted_id
         return format_rag_response(doc)
 
-    async def edit_rag(self, rag_id: str, req: RagUpdateRequest, agent_id: Optional[str] = None) -> RagResponse:
+    async def edit_rag(
+        self, rag_id: str, req: RagUpdateRequest, agent_id: Optional[str] = None
+    ) -> RagResponse:
         try:
             obj_id = ObjectId(rag_id)
         except Exception:
@@ -141,11 +178,8 @@ class MongoVectorDbRagService(IRagService):
         if not existing:
             raise MemoryNotFoundError(rag_id)
 
-        self.collection.update_one(
-            query,
-            {"$set": update_data}
-        )
-        
+        self.collection.update_one(query, {"$set": update_data})
+
         return self.get_rag(rag_id, agent_id=agent_id)
 
     async def delete_rag(self, rag_id: str, agent_id: Optional[str] = None) -> bool:
@@ -153,11 +187,11 @@ class MongoVectorDbRagService(IRagService):
             obj_id = ObjectId(rag_id)
         except Exception:
             raise MemoryNotFoundError(rag_id, message=f"Invalid RAG ID: {rag_id}")
-        
+
         query = {"_id": obj_id}
         if agent_id:
             query = {"$and": [{"_id": obj_id}, self._get_agent_filter(agent_id)]}
-            
+
         res = self.collection.delete_one(query)
         if res.deleted_count == 0:
             raise MemoryNotFoundError(rag_id)
@@ -168,17 +202,17 @@ class MongoVectorDbRagService(IRagService):
             obj_id = ObjectId(rag_id)
         except Exception:
             raise MemoryNotFoundError(rag_id, message=f"Invalid RAG ID: {rag_id}")
-            
+
         query = {"_id": obj_id}
         if agent_id:
             agent_filter = self._get_agent_filter(agent_id)
             agent_filter["$or"].append({"agent_id": None})
             query = {"$and": [{"_id": obj_id}, agent_filter]}
-            
+
         doc = self.collection.find_one(query)
         if not doc:
             raise MemoryNotFoundError(rag_id)
-            
+
         return format_rag_response(doc)
 
     def get_all_rags(self, agent_id: Optional[str] = None) -> List[RagResponse]:
@@ -187,28 +221,44 @@ class MongoVectorDbRagService(IRagService):
             agent_filter = self._get_agent_filter(agent_id)
             agent_filter["$or"].append({"agent_id": None})
             query = agent_filter
-            
+
         docs = self.collection.find(query).sort("updated_at", -1)
         return [format_rag_response(d) for d in docs]
 
     async def update_embedding(self, rag_id: str):
         try:
             from app.services.rag_enrichment_service import RagEnrichmentService
+
             enricher = RagEnrichmentService(self.collection)
             await enricher.enrich_and_embed(rag_id)
-            logger.info(f"Successfully updated RAG embedding: rag_id={rag_id}", extra={"rag_id": rag_id})
+            logger.info(
+                f"Successfully updated RAG embedding: rag_id={rag_id}",
+                extra={"rag_id": rag_id},
+            )
         except Exception as e:
-            logger.error(f"Error updating embedding for rag_id={rag_id}: {e}", exc_info=True)
+            logger.error(
+                f"Error updating embedding for rag_id={rag_id}: {e}", exc_info=True
+            )
             try:
                 self.collection.update_one(
                     {"_id": ObjectId(rag_id)},
-                    {"$set": {"status": "error", "updated_at": datetime.now(timezone.utc)}}
+                    {
+                        "$set": {
+                            "status": "error",
+                            "updated_at": datetime.now(timezone.utc),
+                        }
+                    },
                 )
-            except:
+            except Exception:
+                # Best-effort: a malformed id or a Mongo outage here would
+                # otherwise mask the enrichment error already logged above.
                 pass
 
-    async def search(self, query: str, limit: int = 5, agent_id: Optional[str] = None) -> List[RagResponse]:
+    async def search(
+        self, query: str, limit: int = 5, agent_id: Optional[str] = None
+    ) -> List[RagResponse]:
         import time
+
         start_time = time.perf_counter()
         truncated_query = query[:150] + "..." if len(query) > 150 else query
 
@@ -229,7 +279,7 @@ class MongoVectorDbRagService(IRagService):
                     "path": "embedding",
                     "queryVector": query_embedding,
                     "numCandidates": candidate_limit * 10,
-                    "limit": candidate_limit
+                    "limit": candidate_limit,
                 }
             }
         ]
@@ -251,8 +301,23 @@ class MongoVectorDbRagService(IRagService):
         # Fallback to keyword regex-based text search if vector index returned no results
         if not docs:
             import re
+
             words = [w.strip("?,.!:;()\"'") for w in query.split() if len(w) > 2]
-            stopwords = {"what", "how", "why", "who", "where", "when", "which", "this", "that", "with", "from", "about", "info"}
+            stopwords = {
+                "what",
+                "how",
+                "why",
+                "who",
+                "where",
+                "when",
+                "which",
+                "this",
+                "that",
+                "with",
+                "from",
+                "about",
+                "info",
+            }
             search_words = [w for w in words if w.lower() not in stopwords] or [query]
             pattern = "|".join(re.escape(w) for w in search_words)
             query_filter: dict = {
@@ -266,7 +331,11 @@ class MongoVectorDbRagService(IRagService):
                 agent_filter = self._get_agent_filter(agent_id)
                 agent_filter["$or"].append({"agent_id": None})
                 query_filter = {"$and": [query_filter, agent_filter]}
-            docs = list(self.collection.find(query_filter).sort("updated_at", -1).limit(candidate_limit))
+            docs = list(
+                self.collection.find(query_filter)
+                .sort("updated_at", -1)
+                .limit(candidate_limit)
+            )
 
         if not docs:
             duration = time.perf_counter() - start_time
@@ -277,14 +346,17 @@ class MongoVectorDbRagService(IRagService):
                     "limit": limit,
                     "agent_id": agent_id,
                     "results_count": 0,
-                    "duration": duration
-                }
+                    "duration": duration,
+                },
             )
             return []
 
         # Rerank candidates via OpenRouter cohere/rerank-v3.5
         rerank_results = []
-        doc_texts = [doc.get("question") or f"{doc.get('title', '')}: {doc.get('content', '')}" for doc in docs]
+        doc_texts = [
+            doc.get("question") or f"{doc.get('title', '')}: {doc.get('content', '')}"
+            for doc in docs
+        ]
         try:
             rerank_results = await _rerank(query, doc_texts, top_n=len(docs))
         except Exception as re_err:
@@ -298,15 +370,13 @@ class MongoVectorDbRagService(IRagService):
         # Compute combined score: rerank relevance (or vector search score) + recency boost
         now = datetime.now(timezone.utc)
         for idx, doc in enumerate(docs):
-            # Recency score calculation
-            created_at = doc.get("created_at") or now
-            if isinstance(created_at, str):
-                try:
-                    created_at = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
-                except:
-                    created_at = now
+            # Recency score calculation. Same coercion the response formatter
+            # does, so a row that scores here also serialises.
+            created_at = _as_datetime(doc.get("created_at") or now)
 
-            age_in_days = (now.replace(tzinfo=None) - created_at.replace(tzinfo=None)).total_seconds() / 86400.0
+            age_in_days = (
+                now.replace(tzinfo=None) - created_at.replace(tzinfo=None)
+            ).total_seconds() / 86400.0
             age_in_days = max(0.0, age_in_days)
             # Recency decays from 1.0 (newest) to near 0.0 (old) with a half-life of ~30 days
             recency_score = 1.0 / (1.0 + age_in_days / 30.0)
@@ -329,8 +399,8 @@ class MongoVectorDbRagService(IRagService):
                 "limit": limit,
                 "agent_id": agent_id,
                 "results_count": len(docs),
-                "duration": duration
-            }
+                "duration": duration,
+            },
         )
 
         return [format_rag_response(d) for d in docs]
