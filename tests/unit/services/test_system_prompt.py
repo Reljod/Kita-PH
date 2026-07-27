@@ -14,12 +14,19 @@ import pytest
 from app.services.agents.templates.system_prompt import (
     _GUARDRAILS,
     _INJECTION_MARKERS,
+    TOOL_CONFIG_REGISTRY,
     _sanitise,
+    _to_bullets,
     build_system_prompt,
     build_tool_instructions,
     get_delegate_task_config,
+    get_generic_tool_config,
     get_rag_search_config,
+    get_retrieval_sequence_instruction,
+    get_retrieval_strategy_block,
     get_search_memory_config,
+    get_tool_guidelines_block,
+    get_verification_policy,
     get_web_search_config,
 )
 
@@ -88,6 +95,168 @@ class TestToolConfigs:
             )
         }
         assert len(names) == 4
+
+
+class TestToolConfigRegistry:
+    """Every registered tool ships a config; the sweep below is what stops a
+    new entry from silently landing without a description or a priority."""
+
+    @pytest.mark.parametrize("tool_name", sorted(TOOL_CONFIG_REGISTRY))
+    def test_each_registered_tool_yields_a_well_formed_config(self, tool_name):
+        config = TOOL_CONFIG_REGISTRY[tool_name]()
+        assert config["name"] == tool_name
+        assert config["description"].strip()
+        assert config["instructions"].strip()
+        assert isinstance(config["priority"], int)
+
+    @pytest.mark.parametrize("tool_name", sorted(TOOL_CONFIG_REGISTRY))
+    def test_each_registered_tool_reaches_the_guidelines_block(self, tool_name):
+        assert f"`{tool_name}`" in get_tool_guidelines_block([tool_name])
+
+    def test_the_generic_config_names_the_tool_it_stands_in_for(self):
+        config = get_generic_tool_config("weather_lookup")
+        assert config["name"] == "weather_lookup"
+        assert "weather_lookup" in config["instructions"]
+
+
+class TestToolGuidelinesBlock:
+    def test_no_tools_yields_no_block(self):
+        assert get_tool_guidelines_block([]) == ""
+
+    def test_higher_priority_tools_are_listed_first(self):
+        """Priority ordering is the only signal the model gets about which
+        tool to reach for first, so it has to survive into the text."""
+        block = get_tool_guidelines_block(["web_search", "delegate_task"])
+        by_priority = sorted(
+            ["web_search", "delegate_task"],
+            key=lambda t: -TOOL_CONFIG_REGISTRY[t]()["priority"],
+        )
+        positions = [block.index(f"`{t}`") for t in by_priority]
+        assert positions == sorted(positions)
+
+    def test_equal_priority_tools_are_ordered_by_name(self):
+        names = [
+            n
+            for n in TOOL_CONFIG_REGISTRY
+            if TOOL_CONFIG_REGISTRY[n]()["priority"] == 5
+        ]
+        if len(names) < 2:  # pragma: no cover - guards a registry change
+            pytest.skip("needs at least two tools sharing a priority")
+        block = get_tool_guidelines_block(list(reversed(names)))
+        positions = [block.index(f"`{n}`") for n in sorted(names)]
+        assert positions == sorted(positions)
+
+    def test_a_repeated_tool_is_rendered_twice(self):
+        """Pinning current behaviour rather than endorsing it — the tool list
+        reaching here is already de-duplicated upstream, so the builder does
+        not spend a pass on it."""
+        block = get_tool_guidelines_block(["rag_search", "rag_search"])
+        assert block.count("## Tool: `rag_search`") == 2
+
+
+class TestRetrievalSequence:
+    def test_an_agent_with_no_retrieval_tools_gets_no_sequence(self):
+        assert get_retrieval_sequence_instruction(["delegate_task"]) == ""
+
+    def test_both_memory_tools_are_searched_in_parallel(self):
+        """Running them sequentially doubles latency on the most common
+        path, so the instruction says so explicitly."""
+        sequence = get_retrieval_sequence_instruction(["search_memory", "rag_search"])
+        assert "parallel" in sequence.lower()
+
+    def test_web_search_is_ranked_after_internal_memory(self):
+        sequence = get_retrieval_sequence_instruction(
+            ["search_memory", "rag_search", "web_search"]
+        )
+        assert sequence.index("search_memory") < sequence.index("web_search")
+
+    def test_web_search_is_omitted_when_the_agent_lacks_it(self):
+        sequence = get_retrieval_sequence_instruction(["search_memory", "rag_search"])
+        assert "web_search" not in sequence
+
+    @pytest.mark.parametrize(
+        "tools",
+        [
+            ["search_memory"],
+            ["rag_search"],
+            ["web_search"],
+            ["search_memory", "web_search"],
+            ["rag_search", "web_search"],
+        ],
+    )
+    def test_a_partial_toolset_still_produces_a_numbered_sequence(self, tools):
+        sequence = get_retrieval_sequence_instruction(tools)
+        assert sequence
+        for tool in tools:
+            assert tool in sequence
+
+    def test_the_steps_are_numbered_from_one(self):
+        assert "1. " in get_retrieval_sequence_instruction(["web_search"])
+
+
+class TestVerificationPolicy:
+    def test_an_agent_with_no_retrieval_tools_gets_no_policy(self):
+        assert get_verification_policy(["delegate_task"]) == ""
+
+    def test_both_memory_tools_are_named_together(self):
+        policy = get_verification_policy(["search_memory", "rag_search", "web_search"])
+        assert "in parallel" in policy
+
+    def test_a_single_memory_tool_is_named_alone(self):
+        policy = get_verification_policy(["search_memory", "web_search"])
+        assert "in parallel" not in policy
+        assert "search_memory" in policy
+
+    def test_rag_search_is_preferred_over_search_memory_when_both_exist(self):
+        """`rag_search` is the hybrid retriever; naming it as the canonical
+        one keeps the model from settling for the weaker lookup."""
+        policy = get_verification_policy(["search_memory", "rag_search"])
+        assert "rag_search" in policy
+
+    def test_cross_verification_is_only_demanded_when_both_worlds_are_reachable(self):
+        assert "Cross-Verification" in get_verification_policy(
+            ["rag_search", "web_search"]
+        )
+        assert "Cross-Verification" not in get_verification_policy(["rag_search"])
+
+    def test_a_web_only_agent_is_pointed_at_external_facts(self):
+        policy = get_verification_policy(["web_search"])
+        assert "web_search" in policy and "External" in policy
+
+    def test_a_memory_only_agent_is_not_told_to_web_search(self):
+        assert "web_search" not in get_verification_policy(["rag_search"])
+
+
+class TestRetrievalStrategyBlock:
+    def test_an_agent_with_no_retrieval_tools_gets_no_block(self):
+        assert get_retrieval_strategy_block(["delegate_task"]) == ""
+
+    def test_the_block_carries_both_the_sequence_and_the_policy(self):
+        block = get_retrieval_strategy_block(["rag_search", "web_search"])
+        assert "INFORMATION RETRIEVAL" in block
+        assert "Verification Policy" in block
+
+
+class TestToBullets:
+    def test_none_yields_nothing(self):
+        assert _to_bullets(None) is None
+
+    def test_an_empty_list_yields_nothing(self):
+        assert _to_bullets([]) is None
+
+    def test_items_become_bullets(self):
+        assert _to_bullets(["a", "b"]) == "- a\n- b"
+
+    def test_blank_items_are_dropped(self):
+        assert _to_bullets(["a", "   ", "b"]) == "- a\n- b"
+
+    def test_a_list_of_only_blanks_yields_nothing(self):
+        """An all-blank list must collapse to None, not to an empty bullet,
+        so the conditional template block drops out entirely."""
+        assert _to_bullets(["", "  "]) is None
+
+    def test_bullet_items_are_sanitised(self):
+        assert "```" not in _to_bullets(["a ``` b"])
 
 
 class TestBuildToolInstructions:
