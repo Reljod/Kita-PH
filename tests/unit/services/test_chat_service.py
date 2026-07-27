@@ -14,13 +14,24 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from bson import ObjectId
 
-from app.exceptions import ChatNotFoundError, KitaValidationError
+from app.exceptions import (
+    AgentRunStreamFailedError,
+    ChatNotFoundError,
+    KitaValidationError,
+)
 from app.models.chat import ChatContinueRequest, ChatCreateRequest, ChatResponse
 from app.services.chat_service import ChatService, format_chat_response
 
 OID = ObjectId("64b7f1c2e4b0a1a2b3c4d5e6")
 NOW = datetime(2026, 1, 15, tzinfo=timezone.utc)
 AGENT = "agent_1"
+ORG_ID = "org_test_0001"
+
+
+def a_run_result(messages=None) -> MagicMock:
+    result = MagicMock(name="run_result")
+    result.all_messages.return_value = messages or []
+    return result
 
 
 def chat_doc(**overrides) -> dict:
@@ -41,6 +52,12 @@ def agent_service() -> MagicMock:
     result = MagicMock()
     result.all_messages.return_value = [{"content": "hi"}, {"content": "hello"}]
     service.run = AsyncMock(return_value=result)
+
+    async def run_stream(**kwargs):
+        yield {"type": "content", "delta": "hi"}
+        yield {"type": "result", "result": result}
+
+    service.run_stream = run_stream
     return service
 
 
@@ -318,3 +335,167 @@ class TestGetAllChats:
             [chat_doc(messages=[{"content": "a"}, {"content": "b"}])]
         )
         assert len(service.get_all_chats(preview=True)[0].messages) == 1
+
+
+# --- agent version resolution ---------------------------------------------
+
+
+class TestPinnedAgentVersions:
+    """Chats are written against the *base* agent id, and get_all_chats
+    already normalises before querying. The single-chat lookups did not, so a
+    caller pinned to "<base>-v2" -- a form the routes accept and the rest of
+    the codebase resolves -- was told its own chats did not exist.
+    """
+
+    @pytest.fixture
+    def real_service(self, agent_service, mongo_db):
+        from app.db import TenantCollection
+
+        return ChatService(agent_service, TenantCollection(mongo_db["chats"], ORG_ID))
+
+    @pytest.fixture
+    def seeded(self, mongo_db):
+        from datetime import datetime, timezone
+
+        now = datetime.now(timezone.utc)
+        return str(
+            mongo_db["chats"]
+            .insert_one(
+                {
+                    "org_id": ORG_ID,
+                    "agent_id": AGENT,
+                    "messages": [],
+                    "created_at": now,
+                    "updated_at": now,
+                }
+            )
+            .inserted_id
+        )
+
+    def test_a_pinned_version_reads_its_own_chat(self, real_service, seeded):
+        assert real_service.get_chat(seeded, agent_id=f"{AGENT}-v2")
+
+    def test_a_pinned_version_lists_its_own_chats(self, real_service, seeded):
+        assert len(real_service.get_all_chats(agent_id=f"{AGENT}-v2")) == 1
+
+    async def test_a_pinned_version_continues_its_own_chat(self, real_service, seeded):
+        assert await real_service.continue_chat(
+            seeded, ChatContinueRequest(message="more"), agent_id=f"{AGENT}-v2"
+        )
+
+    async def test_a_pinned_version_continues_its_own_chat_streaming(
+        self, real_service, seeded
+    ):
+        frames = [
+            frame
+            async for frame in real_service.continue_chat_stream(
+                seeded, ChatContinueRequest(message="more"), agent_id=f"{AGENT}-v2"
+            )
+        ]
+        assert frames[-1]["type"] == "done"
+
+    def test_a_genuinely_different_agent_is_still_refused(self, real_service, seeded):
+        """Normalising must not widen the check into no check at all."""
+        with pytest.raises(ChatNotFoundError):
+            real_service.get_chat(seeded, agent_id="6a67000000000000000000ff")
+
+
+# --- streaming ------------------------------------------------------------
+
+
+def a_streaming_agent(*frames):
+    """An agent service whose run_stream replays the given frames."""
+    service = MagicMock(name="agent_service")
+
+    async def run_stream(**kwargs):
+        for frame in frames:
+            yield frame
+
+    service.run_stream = run_stream
+    return service
+
+
+class TestChatStreams:
+    @pytest.fixture
+    def streamed(self, mongo_db):
+        from app.db import TenantCollection
+
+        def _make(*frames):
+            return ChatService(
+                a_streaming_agent(*frames),
+                TenantCollection(mongo_db["chats"], ORG_ID),
+            )
+
+        return _make
+
+    async def test_content_frames_reach_the_caller(self, streamed):
+        service = streamed(
+            {"type": "content", "delta": "hi"},
+            {"type": "result", "result": a_run_result()},
+        )
+        frames = [
+            f
+            async for f in service.create_chat_stream(
+                ChatCreateRequest(message="hi"), agent_id=AGENT
+            )
+        ]
+        assert {"type": "content", "delta": "hi"} in frames
+
+    async def test_the_raw_result_frame_is_not_forwarded(self, streamed):
+        """It carries the run object, which does not serialise to SSE."""
+        service = streamed(
+            {"type": "content", "delta": "hi"},
+            {"type": "result", "result": a_run_result()},
+        )
+        frames = [
+            f
+            async for f in service.create_chat_stream(
+                ChatCreateRequest(message="hi"), agent_id=AGENT
+            )
+        ]
+        assert all(f["type"] != "result" for f in frames)
+
+    async def test_the_stream_ends_with_the_saved_chat(self, streamed, mongo_db):
+        """The client needs the id to navigate to what it just started."""
+        service = streamed({"type": "result", "result": a_run_result()})
+        frames = [
+            f
+            async for f in service.create_chat_stream(
+                ChatCreateRequest(message="hi"), agent_id=AGENT
+            )
+        ]
+        assert frames[-1]["type"] == "done"
+        assert frames[-1]["chat"]["id"] == str(mongo_db["chats"].find_one({})["_id"])
+
+    async def test_a_stream_is_required_to_produce_a_result(self, streamed, mongo_db):
+        """No result means no transcript to save; persisting an empty chat
+        would strand the user's message with no answer."""
+        service = streamed({"type": "content", "delta": "partial"})
+        with pytest.raises(AgentRunStreamFailedError):
+            [
+                f
+                async for f in service.create_chat_stream(
+                    ChatCreateRequest(message="hi"), agent_id=AGENT
+                )
+            ]
+        assert mongo_db["chats"].count_documents({}) == 0
+
+    async def test_streaming_requires_an_agent(self, streamed):
+        service = streamed({"type": "result", "result": a_run_result()})
+        with pytest.raises(KitaValidationError):
+            [
+                f
+                async for f in service.create_chat_stream(
+                    ChatCreateRequest(message="x")
+                )
+            ]
+
+    async def test_a_versioned_agent_id_is_stored_as_its_base(self, streamed, mongo_db):
+        service = streamed({"type": "result", "result": a_run_result()})
+        [
+            f
+            async for f in service.create_chat_stream(
+                ChatCreateRequest(message="hi"), agent_id=f"{AGENT}-v3"
+            )
+        ]
+        assert mongo_db["chats"].find_one({})["agent_id"] == AGENT

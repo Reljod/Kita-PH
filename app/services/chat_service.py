@@ -152,7 +152,13 @@ class ChatService(IChatService):
 
         chat_query = {"_id": obj_id}
         if agent_id:
-            chat_query["agent_id"] = agent_id
+            # Chats are stored against the *base* agent id, and get_all_chats
+            # already normalises before querying. Filtering by the raw value
+            # here made a pinned "<base>-v2" miss its own chats and report
+            # them as not found.
+            from app.models.agent import parse_agent_id
+
+            chat_query["agent_id"] = parse_agent_id(agent_id)[0]
 
         chat = self.collection.find_one(chat_query)
         if not chat:
@@ -252,7 +258,13 @@ class ChatService(IChatService):
 
         chat_query = {"_id": obj_id}
         if agent_id:
-            chat_query["agent_id"] = agent_id
+            # Chats are stored against the *base* agent id, and get_all_chats
+            # already normalises before querying. Filtering by the raw value
+            # here made a pinned "<base>-v2" miss its own chats and report
+            # them as not found.
+            from app.models.agent import parse_agent_id
+
+            chat_query["agent_id"] = parse_agent_id(agent_id)[0]
 
         chat = self.collection.find_one(chat_query)
         if not chat:
@@ -314,7 +326,13 @@ class ChatService(IChatService):
 
         chat_query = {"_id": obj_id}
         if agent_id:
-            chat_query["agent_id"] = agent_id
+            # Chats are stored against the *base* agent id, and get_all_chats
+            # already normalises before querying. Filtering by the raw value
+            # here made a pinned "<base>-v2" miss its own chats and report
+            # them as not found.
+            from app.models.agent import parse_agent_id
+
+            chat_query["agent_id"] = parse_agent_id(agent_id)[0]
 
         chat = self.collection.find_one(chat_query)
         if not chat:
