@@ -6,10 +6,10 @@ from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.exceptions.base import KitaException
-from app.exceptions.system import KitaValidationError
 from app.utils.logger import ctx_trace_id
 
 logger = logging.getLogger("app.middleware.error_handler")
+
 
 def setup_error_handlers(app: FastAPI):
     """Registers global exception handlers on the FastAPI app instance."""
@@ -21,12 +21,12 @@ def setup_error_handlers(app: FastAPI):
             logger.error(
                 f"KitaException [{exc.code}] (Status {exc.status_code}): {exc.message}",
                 extra={"details": exc.details, "code": exc.code},
-                exc_info=True
+                exc_info=True,
             )
         else:
             logger.warning(
                 f"KitaException [{exc.code}] (Status {exc.status_code}): {exc.message}",
-                extra={"details": exc.details, "code": exc.code}
+                extra={"details": exc.details, "code": exc.code},
             )
 
         return JSONResponse(
@@ -36,18 +36,17 @@ def setup_error_handlers(app: FastAPI):
                     "code": exc.code,
                     "message": exc.message,
                     "details": exc.details,
-                    "trace_id": ctx_trace_id.get()
+                    "trace_id": ctx_trace_id.get(),
                 }
-            }
+            },
         )
 
     @app.exception_handler(RequestValidationError)
-    async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    async def validation_exception_handler(
+        request: Request, exc: RequestValidationError
+    ):
         details = {"errors": exc.errors()}
-        logger.warning(
-            f"Validation error: {exc.errors()}",
-            extra={"details": details}
-        )
+        logger.warning(f"Validation error: {exc.errors()}", extra={"details": details})
         return JSONResponse(
             status_code=422,
             content={
@@ -55,9 +54,9 @@ def setup_error_handlers(app: FastAPI):
                     "code": "SYSTEM_VALIDATION_ERROR",
                     "message": "Input validation failed.",
                     "details": details,
-                    "trace_id": ctx_trace_id.get()
+                    "trace_id": ctx_trace_id.get(),
                 }
-            }
+            },
         )
 
     @app.exception_handler(StarletteHTTPException)
@@ -88,9 +87,14 @@ def setup_error_handlers(app: FastAPI):
                     "code": code,
                     "message": exc.detail,
                     "details": {},
-                    "trace_id": ctx_trace_id.get()
+                    "trace_id": ctx_trace_id.get(),
                 }
-            }
+            },
+            # Carry the exception's headers through. Routes attach
+            # `WWW-Authenticate: Bearer` to their 401s, and RFC 7235 requires
+            # a 401 to carry that challenge — building a fresh response
+            # without them silently dropped it.
+            headers=getattr(exc, "headers", None),
         )
 
     @app.exception_handler(Exception)
@@ -101,10 +105,7 @@ def setup_error_handlers(app: FastAPI):
         if app_env == "local":
             details = {"message": str(exc), "type": type(exc).__name__}
 
-        logger.error(
-            f"Unhandled exception: {str(exc)}",
-            exc_info=True
-        )
+        logger.error(f"Unhandled exception: {str(exc)}", exc_info=True)
 
         return JSONResponse(
             status_code=500,
@@ -113,7 +114,7 @@ def setup_error_handlers(app: FastAPI):
                     "code": "SYSTEM_INTERNAL_ERROR",
                     "message": "An unexpected internal server error occurred.",
                     "details": details,
-                    "trace_id": ctx_trace_id.get()
+                    "trace_id": ctx_trace_id.get(),
                 }
-            }
+            },
         )
