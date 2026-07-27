@@ -588,3 +588,161 @@ class TestCallCheapLlm:
     async def test_a_plain_answer_gets_a_small_budget(self, service, registry):
         await service._call_cheap_llm("sys", "user")
         assert registry.llm_service.run.await_args.kwargs["max_tokens"] == 50
+
+
+# --- the streaming loop ---------------------------------------------------
+
+
+def a_streaming_agent(*drafts: str) -> MagicMock:
+    """An agent whose run_stream replays one draft per attempt, a chunk at a
+    time, through the async-context-manager shape pydantic-ai uses."""
+    queue = list(drafts) or [""]
+
+    class Stream:
+        def __init__(self, text):
+            self.text = text
+
+        async def stream_text(self, delta=True):
+            for chunk in self.text.split(" "):
+                yield chunk
+
+    class Ctx:
+        def __init__(self, text):
+            self.stream = Stream(text)
+
+        async def __aenter__(self):
+            return self.stream
+
+        async def __aexit__(self, *exc):
+            return False
+
+    agent = MagicMock(name="streaming_agent")
+    agent.run_stream = MagicMock(
+        side_effect=lambda *a, **k: Ctx(queue.pop(0) if len(queue) > 1 else queue[0])
+    )
+    return agent
+
+
+async def collect(service, agent, **kwargs) -> list[dict]:
+    return [
+        frame
+        async for frame in service.run_agentic_flow_stream("q", agent, None, **kwargs)
+    ]
+
+
+class TestRunAgenticFlowStream:
+    @pytest.fixture(autouse=True)
+    def stub_graders(self, service, monkeypatch):
+        monkeypatch.setattr(
+            service, "condense_query", AsyncMock(side_effect=lambda q, *a, **k: q)
+        )
+        monkeypatch.setattr(
+            service, "rewrite_query", AsyncMock(side_effect=lambda q, **k: q)
+        )
+        monkeypatch.setattr(service, "grade_groundedness", AsyncMock(return_value=True))
+        monkeypatch.setattr(service, "grade_completeness", AsyncMock(return_value=True))
+
+    async def test_chunks_are_streamed_as_content(self, service, monkeypatch):
+        monkeypatch.setattr(service, "route_query", AsyncMock(return_value="none"))
+        frames = await collect(service, a_streaming_agent("hello there"))
+        assert [f["delta"] for f in frames if f["type"] == "content"] == [
+            "hello",
+            "there",
+        ]
+
+    async def test_the_stream_ends_with_a_result(self, service, monkeypatch):
+        monkeypatch.setattr(service, "route_query", AsyncMock(return_value="none"))
+        frames = await collect(service, a_streaming_agent("hi"))
+        assert frames[-1]["type"] == "result"
+
+    async def test_retrieved_facts_reach_the_generator(self, service, monkeypatch):
+        monkeypatch.setattr(service, "route_query", AsyncMock(return_value="vector"))
+        monkeypatch.setattr(
+            service, "retrieve_facts", AsyncMock(return_value=["a known fact"])
+        )
+        agent = a_streaming_agent("hi")
+        await collect(service, agent)
+        assert "a known fact" in agent.run_stream.call_args.kwargs["instructions"]
+
+    async def test_an_ungrounded_draft_is_retracted(self, service, monkeypatch):
+        """The rejected draft has already been streamed to the browser, so the
+        client needs telling to throw it away before the retry arrives."""
+        monkeypatch.setattr(service, "route_query", AsyncMock(return_value="vector"))
+        monkeypatch.setattr(service, "retrieve_facts", AsyncMock(return_value=["f"]))
+        monkeypatch.setattr(
+            service, "grade_groundedness", AsyncMock(side_effect=[False, True])
+        )
+        frames = await collect(service, a_streaming_agent("bad draft", "good draft"))
+        assert {"type": "reset"} in frames
+        assert frames[-1]["type"] == "result"
+
+    async def test_an_incomplete_draft_is_retracted(self, service, monkeypatch):
+        monkeypatch.setattr(service, "route_query", AsyncMock(return_value="vector"))
+        monkeypatch.setattr(service, "retrieve_facts", AsyncMock(return_value=["f"]))
+        monkeypatch.setattr(
+            service, "grade_completeness", AsyncMock(side_effect=[False, True])
+        )
+        frames = await collect(service, a_streaming_agent("partial", "full"))
+        assert {"type": "reset"} in frames
+
+    async def test_an_empty_internal_search_fails_over_to_the_web(
+        self, service, monkeypatch
+    ):
+        monkeypatch.setattr(service, "route_query", AsyncMock(return_value="vector"))
+        strategies = []
+
+        async def retrieve(strategy, query, **kwargs):
+            strategies.append(strategy)
+            return [] if strategy == "vector" else ["web fact"]
+
+        monkeypatch.setattr(service, "retrieve_facts", retrieve)
+        await collect(service, a_streaming_agent("hi"))
+        assert strategies == ["vector", "web"]
+
+    async def test_the_loop_gives_up_after_three_attempts(self, service, monkeypatch):
+        monkeypatch.setattr(service, "route_query", AsyncMock(return_value="vector"))
+        monkeypatch.setattr(service, "retrieve_facts", AsyncMock(return_value=["f"]))
+        monkeypatch.setattr(
+            service, "grade_completeness", AsyncMock(return_value=False)
+        )
+        agent = a_streaming_agent("draft")
+        frames = await collect(service, agent)
+        assert agent.run_stream.call_count == 3
+        assert frames[-1]["type"] == "result"
+
+    async def test_the_original_query_is_what_the_generator_answers(
+        self, service, monkeypatch
+    ):
+        monkeypatch.setattr(service, "route_query", AsyncMock(return_value="vector"))
+        monkeypatch.setattr(service, "retrieve_facts", AsyncMock(return_value=["f"]))
+        monkeypatch.setattr(
+            service, "condense_query", AsyncMock(return_value="condensed form")
+        )
+        agent = a_streaming_agent("hi")
+        await collect(service, agent)
+        assert agent.run_stream.call_args[0][0] == "q"
+
+    async def test_the_generation_step_is_published(
+        self, service, monkeypatch, status_service
+    ):
+        monkeypatch.setattr(service, "route_query", AsyncMock(return_value="none"))
+        await collect(service, a_streaming_agent("hi"), status_key=STATUS_KEY)
+        steps = [call[0][1] for call in status_service.update_step.await_args_list]
+        assert "generate_response" in steps
+
+    async def test_a_status_failure_does_not_stop_the_stream(
+        self, service, monkeypatch, status_service
+    ):
+        monkeypatch.setattr(service, "route_query", AsyncMock(return_value="none"))
+        status_service.update_step = AsyncMock(side_effect=RuntimeError("redis down"))
+        frames = await collect(service, a_streaming_agent("hi"), status_key=STATUS_KEY)
+        assert frames[-1]["type"] == "result"
+
+    async def test_the_tenant_reaches_the_generator_dependencies(
+        self, service, monkeypatch
+    ):
+        monkeypatch.setattr(service, "route_query", AsyncMock(return_value="none"))
+        agent = a_streaming_agent("hi")
+        await collect(service, agent, agent_id=AGENT_ID)
+        deps = agent.run_stream.call_args.kwargs["deps"]
+        assert deps["org_id"] == ORG_ID and deps["agent_id"] == AGENT_ID
