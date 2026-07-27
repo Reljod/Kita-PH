@@ -38,6 +38,23 @@ don't narrate it.
 - **Quality by layering, not diligence.** Cheap deterministic checks early
   under mandatory ones later beats relying on remembering to be careful (see
   the layer model below).
+- **This sandbox has HTTPS egress only.** `:443` works, so Supabase,
+  OpenRouter and the FastAPI Cloud API are reachable; Mongo Atlas `:27017`
+  and Redis Cloud are not. A connection timeout to those is the network, not
+  the credentials — don't go looking for a bad password.
+- **Deploy tokens deploy, nothing else.** Reading or writing an app's
+  environment variables and streaming its logs all need broader scope, so a
+  config change is a dashboard action, not something to automate around.
+  → **`deploy-fastapi-cloud`**
+- **Read the API's own status codes to diagnose a deployment.** A fast
+  `401 Invalid x-client-id` proves the database was queried; a slow
+  `500 Database error` is what a missing `MONGO_URI` actually looks like.
+  → **`deploy-fastapi-cloud`**
+- **Agent versions come from the counter, never from a literal.**
+  `create_agent` writing `version=1` while leaving the counter un-seeded put
+  two documents at the same `(base_id, version)` and made a pinned
+  `<base_id>-v1` ambiguous. Anything allocating a version goes through
+  `_next_version`.
 - _Add your project's WHYs here as they emerge._
 
 ## How code quality is enforced (the layer model)
