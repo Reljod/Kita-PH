@@ -108,8 +108,10 @@ def format_agent_response(
     base_id = doc.get("base_id") or str(doc["_id"])
     version = doc.get("version", 1)
 
-    formatted_id = f"{base_id}-v{version}" if version > 1 else base_id
-
+    # `id` is deliberately the bare base_id even for later versions — pinning
+    # the versioned form here would change every client URL. A vestigial
+    # `formatted_id` used to be computed for that and never used; CI lints
+    # whole changed files, so it had to go rather than sit here unread.
     return AgentResponse(
         id=base_id,
         base_id=base_id,
