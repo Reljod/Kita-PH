@@ -11,12 +11,15 @@ from __future__ import annotations
 
 import pytest
 
+from app.models.agent import AgentLanguage
 from app.services.agents.templates.system_prompt import (
     _GUARDRAILS,
     _INJECTION_MARKERS,
+    _LANGUAGE_INSTRUCTION_FILES,
     TOOL_CONFIG_REGISTRY,
     _sanitise,
     _to_bullets,
+    build_language_instructions,
     build_system_prompt,
     build_tool_instructions,
     get_delegate_task_config,
@@ -359,3 +362,71 @@ class TestBuildSystemPrompt:
         """The prompt is persisted alongside agents, so a rebuild that
         differed would make versions look changed when they are not."""
         assert build_system_prompt(**IDENTITY) == build_system_prompt(**IDENTITY)
+
+
+class TestLanguageInstructions:
+    """The language block is the one part of the prompt selected by an enum
+    rather than assembled from caller text, which is what keeps this path out
+    of reach of prompt injection."""
+
+    def test_english_contributes_no_block(self):
+        """English is what every agent already spoke, so it must not perturb
+        an existing prompt."""
+        assert build_language_instructions(AgentLanguage.ENGLISH) == ""
+
+    def test_an_unset_language_contributes_no_block(self):
+        assert build_language_instructions(None) == ""
+
+    def test_filipino_returns_the_taglish_block(self):
+        assert "Taglish" in build_language_instructions(AgentLanguage.FILIPINO)
+
+    def test_every_declared_instruction_file_exists(self):
+        """The block is read from disk at prompt-build time, so a missing or
+        renamed file would surface as a runtime error on an agent run rather
+        than at import."""
+        for path in _LANGUAGE_INSTRUCTION_FILES.values():
+            assert path.is_file()
+
+    def test_the_string_form_is_accepted(self):
+        """Documents come back out of Mongo as bare strings."""
+        assert build_language_instructions("filipino") == build_language_instructions(
+            AgentLanguage.FILIPINO
+        )
+
+
+class TestLanguageInTheSystemPrompt:
+    def test_an_english_prompt_is_unchanged_by_the_setting(self):
+        """Existing agents are not migrated; their prompt must stay identical
+        whether the field is absent or explicitly english."""
+        assert build_system_prompt(**IDENTITY) == build_system_prompt(
+            **IDENTITY, language=AgentLanguage.ENGLISH
+        )
+
+    def test_a_filipino_agent_is_told_to_speak_taglish(self):
+        prompt = build_system_prompt(**IDENTITY, language=AgentLanguage.FILIPINO)
+        assert "Taglish" in prompt
+
+    def test_the_guardrails_still_come_last(self):
+        """The language block is rendered at the very end of the body, so it
+        is the section most likely to displace the guardrails."""
+        prompt = build_system_prompt(**IDENTITY, language=AgentLanguage.FILIPINO)
+        assert prompt.rstrip().endswith(_GUARDRAILS)
+
+    def test_the_identity_survives_alongside_the_language_block(self):
+        prompt = build_system_prompt(**IDENTITY, language=AgentLanguage.FILIPINO)
+        assert "Researcher" in prompt and "find things" in prompt
+
+    def test_the_language_block_composes_with_tools_and_personalities(self):
+        prompt = build_system_prompt(
+            **IDENTITY,
+            personalities=["curious"],
+            tools=["delegate_task"],
+            language=AgentLanguage.FILIPINO,
+        )
+        assert "curious" in prompt
+        assert "delegate_task" in prompt
+        assert "Taglish" in prompt
+
+    def test_the_language_block_precedes_the_guardrails(self):
+        prompt = build_system_prompt(**IDENTITY, language=AgentLanguage.FILIPINO)
+        assert prompt.index("Taglish") < prompt.index(_GUARDRAILS)

@@ -18,7 +18,7 @@ import pytest
 from bson import ObjectId
 
 from app.db import TenantCollection
-from app.models.agent import AgentCreateRequest, AgentUpdateRequest
+from app.models.agent import AgentCreateRequest, AgentLanguage, AgentUpdateRequest
 from app.services.agent_service import AgentService
 
 ORG_ID = "org_test_0001"
@@ -269,6 +269,7 @@ class TestUpdateAgent:
             ("llm_id", "llm_2"),
             ("personalities", ["terse"]),
             ("tools", ["web_search"]),
+            ("language", AgentLanguage.FILIPINO),
         ],
     )
     async def test_each_field_can_be_updated(self, service, agent, field, value):
@@ -586,3 +587,104 @@ class TestGetRunnableAgent:
         await service.update_agent(agent.id, AgentUpdateRequest(name="Changed"))
         runnable = service.get_runnable_agent(f"{agent.base_id}-v1")
         assert "Researcher" in str(runnable._instructions)
+
+
+class TestAgentLanguagePersistence:
+    """Language is stored on the agent document, and every write path in this
+    service rebuilds that document by hand. A path that forgets the field
+    silently resets the agent to English — the same class of bug as a dropped
+    version number, and just as invisible to the user who set it."""
+
+    async def test_it_defaults_to_english(self, service, agent):
+        assert agent.language is AgentLanguage.ENGLISH
+
+    async def test_it_is_stored_as_a_plain_string(self, service, agents_collection):
+        """Anything reading this collection that is not the Pydantic model —
+        a migration, a shell, an aggregation — should see a bare value."""
+        await service.create_agent(a_request(language=AgentLanguage.FILIPINO))
+        assert agents_collection.find_one({})["language"] == "filipino"
+
+    async def test_it_round_trips_through_creation(self, service):
+        created = await service.create_agent(a_request(language=AgentLanguage.FILIPINO))
+        assert created.language is AgentLanguage.FILIPINO
+
+    async def test_a_filipino_agent_gets_the_taglish_prompt_on_creation(self, service):
+        created = await service.create_agent(a_request(language=AgentLanguage.FILIPINO))
+        assert "Taglish" in created.system_prompt
+
+    async def test_the_prompt_is_rebuilt_with_the_language_on_read(self, service):
+        created = await service.create_agent(a_request(language=AgentLanguage.FILIPINO))
+        assert "Taglish" in service.get_agent(created.id).system_prompt
+
+    async def test_an_english_agent_gets_no_taglish_prompt(self, service, agent):
+        assert "Taglish" not in service.get_agent(agent.id).system_prompt
+
+    async def test_it_survives_an_unrelated_versioned_edit(self, service):
+        """Renaming a Filipino agent must not quietly turn it English."""
+        created = await service.create_agent(a_request(language=AgentLanguage.FILIPINO))
+        updated = await service.update_agent(
+            created.id, AgentUpdateRequest(name="Renamed")
+        )
+        assert updated.language is AgentLanguage.FILIPINO
+
+    async def test_it_survives_an_unrelated_in_place_edit(self, service):
+        created = await service.create_agent(a_request(language=AgentLanguage.FILIPINO))
+        updated = await service.update_agent(
+            created.id, AgentUpdateRequest(name="Renamed"), new_version=False
+        )
+        assert updated.language is AgentLanguage.FILIPINO
+
+    async def test_it_can_be_switched_back_to_english(self, service):
+        created = await service.create_agent(a_request(language=AgentLanguage.FILIPINO))
+        updated = await service.update_agent(
+            created.id, AgentUpdateRequest(language=AgentLanguage.ENGLISH)
+        )
+        assert updated.language is AgentLanguage.ENGLISH
+        assert "Taglish" not in updated.system_prompt
+
+    async def test_switching_language_rebuilds_the_prompt(self, service, agent):
+        updated = await service.update_agent(
+            agent.id, AgentUpdateRequest(language=AgentLanguage.FILIPINO)
+        )
+        assert "Taglish" in updated.system_prompt
+
+    async def test_it_survives_attaching_a_tool(self, service):
+        created = await service.create_agent(a_request(language=AgentLanguage.FILIPINO))
+        await service.add_tools(created.id, ["web_search"])
+        assert service.get_agent(created.id).language is AgentLanguage.FILIPINO
+
+    async def test_it_survives_detaching_a_tool(self, service):
+        created = await service.create_agent(
+            a_request(language=AgentLanguage.FILIPINO, tools=["web_search"])
+        )
+        await service.remove_tools(created.id, ["web_search"])
+        assert service.get_agent(created.id).language is AgentLanguage.FILIPINO
+
+    async def test_an_agent_predating_the_field_still_loads(
+        self, service, agents_collection
+    ):
+        """Existing documents carry no `language` key and are not migrated."""
+        created = await service.create_agent(a_request())
+        agents_collection.update_one({}, {"$unset": {"language": ""}})
+        assert service.get_agent(created.id).language is AgentLanguage.ENGLISH
+
+    async def test_a_pinned_version_keeps_the_language_it_was_created_with(
+        self, service
+    ):
+        """Pinning exists so a validated definition cannot shift underneath a
+        caller; the language is part of that definition."""
+        created = await service.create_agent(a_request(language=AgentLanguage.FILIPINO))
+        await service.update_agent(
+            created.id, AgentUpdateRequest(language=AgentLanguage.ENGLISH)
+        )
+        assert (
+            service.get_agent(f"{created.base_id}-v1").language
+            is AgentLanguage.FILIPINO
+        )
+
+    async def test_the_runnable_agent_carries_the_taglish_instruction(self, service):
+        """The prompt on the response is informational; this is the one that
+        actually reaches the model."""
+        created = await service.create_agent(a_request(language=AgentLanguage.FILIPINO))
+        runnable = service.get_runnable_agent(created.id)
+        assert "Taglish" in str(runnable._instructions)

@@ -15,6 +15,7 @@ from app.models.agent import (
     AgentDocument,
     parse_agent_id,
     format_agent_response,
+    resolve_agent_language,
 )
 from app.services.llm_service import ILlmService
 from app.services.agents.templates.system_prompt import build_system_prompt
@@ -114,6 +115,7 @@ class AgentService(IAgentService):
             goal=req.goal,
             backstory=req.backstory,
             personalities=req.personalities,
+            language=req.language,
             llm_id=req.llm_id,
             tools=req.tools or [],
             version=1,
@@ -121,6 +123,10 @@ class AgentService(IAgentService):
         )
 
         doc = new_agent.model_dump()
+        # model_dump() hands back the enum member. It is a str subclass so bson
+        # would store it, but storing the plain value keeps the document
+        # readable by anything that is not this Pydantic model.
+        doc["language"] = new_agent.language.value
         res = self.collection.insert_one(doc)
 
         base_id_str = str(res.inserted_id)
@@ -139,6 +145,7 @@ class AgentService(IAgentService):
             backstory=req.backstory,
             personalities=req.personalities,
             tools=tool_names,
+            language=req.language,
         )
         return format_agent_response(doc, system_prompt=system_prompt)
 
@@ -185,6 +192,7 @@ class AgentService(IAgentService):
             backstory=doc["backstory"],
             personalities=doc.get("personalities"),
             tools=tool_names,
+            language=resolve_agent_language(doc.get("language")),
         )
 
     def get_agent(self, agent_id: str) -> Optional[AgentResponse]:
@@ -218,6 +226,13 @@ class AgentService(IAgentService):
                 "personalities": req.personalities
                 if req.personalities is not None
                 else latest_doc.get("personalities"),
+                # A version copy that forgets `language` silently resets the
+                # agent to English on any unrelated edit.
+                "language": (
+                    req.language
+                    if req.language is not None
+                    else resolve_agent_language(latest_doc.get("language"))
+                ).value,
                 "llm_id": req.llm_id
                 if req.llm_id is not None
                 else latest_doc["llm_id"],
@@ -246,6 +261,8 @@ class AgentService(IAgentService):
                 update_fields["backstory"] = req.backstory
             if req.personalities is not None:
                 update_fields["personalities"] = req.personalities
+            if req.language is not None:
+                update_fields["language"] = req.language.value
             if req.llm_id is not None:
                 update_fields["llm_id"] = req.llm_id
             if req.tools is not None:
@@ -314,6 +331,7 @@ class AgentService(IAgentService):
             "goal": latest_doc["goal"],
             "backstory": latest_doc["backstory"],
             "personalities": latest_doc.get("personalities"),
+            "language": resolve_agent_language(latest_doc.get("language")).value,
             "llm_id": latest_doc["llm_id"],
             "tools": current_tools,
             "base_id": base_id,
@@ -344,6 +362,7 @@ class AgentService(IAgentService):
             "goal": latest_doc["goal"],
             "backstory": latest_doc["backstory"],
             "personalities": latest_doc.get("personalities"),
+            "language": resolve_agent_language(latest_doc.get("language")).value,
             "llm_id": latest_doc["llm_id"],
             "tools": current_tools,
             "base_id": base_id,
