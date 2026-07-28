@@ -43,6 +43,28 @@ enough — someone has to set them in the dashboard. Do not spend time
 looking for a CLI flag that works around this; there isn't one, and the
 restriction is deliberate.
 
+## Deploying from CI
+
+`.github/workflows/deploy.yml` already does this on every merge to `main`;
+credentials live on the `Production – kita-ph` environment. Two things
+make that job cheap, and both are easy to get wrong when editing it:
+
+```bash
+uv sync --only-group dev                          # not `uv sync`
+uv run --no-sync python -m fastapi_cloud_cli deploy
+```
+
+The build happens on FastAPI Cloud, so a runner never needs the app's
+runtime dependencies — and `uv run fastapi deploy` would drag in torch
+(gigabytes) just to upload a tarball. The dev group alone has no `fastapi`
+console script, hence `python -m`; the module entrypoint takes the same
+arguments, including `FASTAPI_CLOUD_APP_ID` as the env var behind
+`--app-id`.
+
+`fastapi cloud setup-ci` will scaffold this from scratch elsewhere — it
+mints a 365-day deploy token and writes both secrets through the `gh` CLI.
+It always writes repo-level secrets, never environment-scoped ones.
+
 ## Linking without the interactive prompt
 
 `fastapi cloud link` has no `--app-id`, but the config it writes is two

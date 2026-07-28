@@ -42,6 +42,46 @@ Below is the exhaustive checklist of environment variables that **must** be set 
 
 ---
 
+## 🤖 Continuous Deployment (FastAPI Cloud)
+
+`.github/workflows/deploy.yml` ships `main` to FastAPI Cloud on every merge.
+The run is `Tests → FastAPI Cloud`: the deploy job only starts once the full
+suite (and the 90% coverage gate) has passed on the merge commit itself, and
+production deploys are serialized so two merges can never race to promote.
+
+### One-time setup
+
+Everything lives on the **`Production – kita-ph`** GitHub Actions environment
+(*Settings → Environments*), so deploy credentials are never exposed to a
+workflow running on a fork or a feature branch:
+
+| Name | Kind | Value |
+| :--- | :--- | :--- |
+| `FASTAPI_CLOUD_TOKEN` | **Secret** | A FastAPI Cloud deploy token (`fcd_...`). |
+| `FASTAPI_CLOUD_APP_ID` | Variable | The app UUID from the dashboard header. A secret of the same name also works. |
+| `FASTAPI_CLOUD_APP_URL` | Variable *(optional)* | Public app URL, e.g. `https://kita-api.fastapicloud.dev`. Enables the post-deploy smoke check. |
+
+Add required reviewers to that environment if you want a merge to pause for
+manual approval before it ships — the workflow needs no changes for that.
+
+### What the pipeline does and does not cover
+
+- **Does not set application environment variables.** A deploy token is scoped
+  to deploying; `fastapi cloud env set` and `fastapi cloud logs` both return
+  `401` under one. The variables in the table above are for *GitHub*; the
+  application's own variables are a dashboard action. Change them there, then
+  re-run the workflow (**Actions → Deploy → Run workflow**) so the running
+  app picks them up.
+- **Fails loudly on a bad build.** The CLI streams the build log into the job
+  and exits non-zero if the build or the promotion fails.
+- **Verifies the app actually serves**, when `FASTAPI_CLOUD_APP_URL` is set, by
+  polling `/openapi.json` — a route that needs neither auth nor a database, so
+  a `200` isolates "the new build booted" from "the database is misconfigured".
+
+Manual and local deploys are unchanged: see `.agents/skills/deploy-fastapi-cloud`.
+
+---
+
 ## 📦 Container Deployment (Docker)
 
 The project includes a multi-purpose `Dockerfile` optimized for minimal resource footprints.
