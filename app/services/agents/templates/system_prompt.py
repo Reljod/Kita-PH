@@ -2,9 +2,19 @@ import re
 from pathlib import Path
 from typing import List, Optional
 
+from app.models.agent import AgentLanguage
+
 _TEMPLATE_PATH = Path(__file__).parent / "system_prompt.md"
 _MEMORY_TOOL_PATH = Path(__file__).parent / "tools" / "memory.md"
 _TOOLS_INSTRUCTIONS_PATH = Path(__file__).parent / "tools" / "tools.md"
+_LANGUAGES_DIR = Path(__file__).parent / "languages"
+
+# English is the language every agent already spoke, so it contributes no
+# block at all — an English agent's prompt is byte-identical to what it was
+# before this setting existed.
+_LANGUAGE_INSTRUCTION_FILES = {
+    AgentLanguage.FILIPINO: _LANGUAGES_DIR / "filipino.md",
+}
 
 
 # Fixed guardrails — never derived from user input, always appended last.
@@ -102,7 +112,8 @@ def get_create_agent_config() -> dict:
         "description": "Finalizes the details of a new agent and saves it to the database.",
         "instructions": (
             "Use `create_agent` to create a new specialized AI agent. Call this tool when you have collected all the "
-            "necessary information from the user (name, role, goal, backstory, and optional personalities or LLM ID)."
+            "necessary information from the user (name, role, goal, backstory, and optional personalities, language, "
+            "or LLM ID). Set `language` to `filipino` when the user wants an agent that speaks Taglish."
         ),
         "priority": 5,
     }
@@ -137,7 +148,7 @@ def get_update_agent_config() -> dict:
         "description": "Updates an existing agent's configuration.",
         "instructions": (
             "Use `update_agent` to modify the configuration of an existing agent. You can update the name, role, goal, "
-            "backstory, personalities, or LLM ID. By default, it creates a new version, but you can set `new_version=False` "
+            "backstory, personalities, language, or LLM ID. By default, it creates a new version, but you can set `new_version=False` "
             "to update the current version in place."
         ),
         "priority": 5,
@@ -386,6 +397,23 @@ def build_tool_instructions(available_tools: List[str]) -> str:
     return "\n\n".join(parts).strip()
 
 
+def build_language_instructions(language: Optional[AgentLanguage]) -> str:
+    """Return the fixed instruction block for an agent's language.
+
+    The block is selected by enum and read from a repo-owned file, never
+    assembled from caller-supplied text, so this path cannot carry an
+    injection the way the identity fields can.
+    """
+    if language is None:
+        return ""
+
+    path = _LANGUAGE_INSTRUCTION_FILES.get(AgentLanguage(language))
+    if path is None:
+        return ""
+
+    return path.read_text(encoding="utf-8").strip()
+
+
 def _render_template(
     name: str,
     role: str,
@@ -394,6 +422,7 @@ def _render_template(
     personalities: Optional[str],
     tools: Optional[str] = None,
     tool_instructions: Optional[str] = None,
+    language_instructions: Optional[str] = None,
 ) -> str:
     """Load system_prompt.md and resolve all placeholders and conditional blocks."""
     raw = _TEMPLATE_PATH.read_text(encoding="utf-8")
@@ -410,6 +439,7 @@ def _render_template(
         "personalities": personalities or "",
         "tools": tools or "",
         "tool_instructions": tool_instructions or "",
+        "language_instructions": language_instructions or "",
     }
 
     # Resolve conditional blocks: [[ key ]] ... [[ /key ]]
@@ -449,6 +479,7 @@ def build_system_prompt(
     backstory: str,
     personalities: Optional[List[str]] = None,
     tools: Optional[List[str]] = None,
+    language: Optional[AgentLanguage] = None,
 ) -> str:
     """
     Build a secure, structured system prompt from agent identity fields.
@@ -472,6 +503,7 @@ def build_system_prompt(
         tools_block = _TOOLS_INSTRUCTIONS_PATH.read_text(encoding="utf-8").strip()
 
     tool_instructions = build_tool_instructions(tools_list)
+    language_instructions = build_language_instructions(language)
 
     body = _render_template(
         name=name,
@@ -481,5 +513,6 @@ def build_system_prompt(
         personalities=personalities_block,
         tools=tools_block,
         tool_instructions=tool_instructions,
+        language_instructions=language_instructions,
     )
     return f"{body}\n\n{_GUARDRAILS}"

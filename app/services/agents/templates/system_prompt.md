@@ -23,4 +23,10 @@ Personalities:
 {{tool_instructions}}
 [[/tool_instructions]]
 
+# The language block sits last in the body — closest to the guardrails — so the
+# instruction that shapes every single reply is the freshest thing in context.
+[[language_instructions]]
+{{language_instructions}}
+[[/language_instructions]]
+
 

@@ -3,8 +3,14 @@ from pydantic import Field
 from typing import List, Optional, Annotated
 from pydantic_ai import RunContext
 from app.db import db, TenantCollection
-from app.models.agent import format_agent_response
+from app.models.agent import AgentLanguage, format_agent_response
 from app.utils.logger import log_tool_call
+
+_LANGUAGE_FIELD_DESCRIPTION = (
+    "The language the agent speaks in. 'english' is the default; 'filipino' "
+    "makes the agent reply in natural conversational Taglish on every turn, "
+    "regardless of the language the user writes in."
+)
 
 creator_toolset = FunctionToolset()
 
@@ -23,6 +29,9 @@ async def create_agent(
             description="A list of personality traits for the agent (e.g. 'friendly', 'concise', 'formal', 'empathetic'). These shape how the agent communicates."
         ),
     ] = None,
+    language: Annotated[
+        AgentLanguage, Field(description=_LANGUAGE_FIELD_DESCRIPTION)
+    ] = AgentLanguage.ENGLISH,
     llm_id: Annotated[
         Optional[str],
         Field(
@@ -79,6 +88,7 @@ async def create_agent(
         goal=goal,
         backstory=backstory,
         personalities=personalities,
+        language=language,
         llm_id=llm_id,
     )
     agent = await agent_service.create_agent(req)
@@ -143,6 +153,7 @@ async def get_agent(
         f"Goal: {agent.goal}\n"
         f"Backstory: {agent.backstory}\n"
         f"Personalities: {', '.join(agent.personalities) if agent.personalities else 'None'}\n"
+        f"Language: {agent.language.value}\n"
         f"Tools: {', '.join(agent.tools) if agent.tools else 'None'}"
     )
 
@@ -195,6 +206,9 @@ async def update_agent(
         Optional[List[str]],
         Field(description="Updated list of personality traits for the agent."),
     ] = None,
+    language: Annotated[
+        Optional[AgentLanguage], Field(description=_LANGUAGE_FIELD_DESCRIPTION)
+    ] = None,
     llm_id: Annotated[
         Optional[str], Field(description="The new LLM ID for the agent.")
     ] = None,
@@ -225,6 +239,7 @@ async def update_agent(
         goal=goal,
         backstory=backstory,
         personalities=personalities,
+        language=language,
         llm_id=llm_id,
     )
 

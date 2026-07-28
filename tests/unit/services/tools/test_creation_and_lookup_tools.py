@@ -295,3 +295,41 @@ class TestFetchLatestParse:
         service.get_latest_parse = AsyncMock(side_effect=RuntimeError("mongo down"))
         result = await fetch_latest_parse(a_context(parse_service=service), "file_1")
         assert "Error fetching" in result["error"]
+
+
+class TestAgentLanguageTool:
+    """The creator agent is the conversational route into these settings, so
+    the language has to be reachable from a tool call, not only from the UI."""
+
+    async def test_an_agent_defaults_to_english(self, llms, agents):
+        await create_agent(a_context(), "Scribe", "r", "g", "b")
+        assert agents.find_one({})["language"] == "english"
+
+    async def test_filipino_is_stored(self, llms, agents):
+        await create_agent(a_context(), "Scribe", "r", "g", "b", language="filipino")
+        assert agents.find_one({})["language"] == "filipino"
+
+    async def test_the_language_can_be_changed_on_an_existing_agent(self, llms, agents):
+        await create_agent(a_context(), "Scribe", "r", "g", "b")
+        base_id = agents.find_one({})["base_id"]
+        await update_agent(a_context(), base_id, language="filipino")
+        latest = agents.find_one({"base_id": base_id}, sort=[("version", -1)])
+        assert latest["language"] == "filipino"
+
+    async def test_an_unrelated_update_keeps_the_language(self, llms, agents):
+        """update_agent writes a whole new version document, so a field it
+        forgets to copy is silently reset."""
+        await create_agent(a_context(), "Scribe", "r", "g", "b", language="filipino")
+        base_id = agents.find_one({})["base_id"]
+        await update_agent(a_context(), base_id, name="Renamed")
+        latest = agents.find_one({"base_id": base_id}, sort=[("version", -1)])
+        assert latest["language"] == "filipino"
+
+    async def test_the_language_is_reported_when_describing_an_agent(
+        self, llms, agents
+    ):
+        """The creator agent reads this back to the user, so it has to be in
+        the description rather than only in the database."""
+        await create_agent(a_context(), "Scribe", "r", "g", "b", language="filipino")
+        base_id = agents.find_one({})["base_id"]
+        assert "Language: filipino" in await get_agent(a_context(), base_id)

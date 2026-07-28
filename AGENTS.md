@@ -55,6 +55,15 @@ don't narrate it.
   two documents at the same `(base_id, version)` and made a pinned
   `<base_id>-v1` ambiguous. Anything allocating a version goes through
   `_next_version`.
+- **An agent's language is an enum, never free text.** The value selects a
+  fixed instruction block under `templates/languages/`, so the prompt never
+  carries user-supplied language text and needs no sanitising on that path.
+  English deliberately contributes no block, which keeps un-migrated agents'
+  prompts byte-identical to what they were before the setting existed.
+- **Every write path rebuilds the agent document by hand.** `update_agent`,
+  `add_tools` and `remove_tools` each construct a fresh version copy, so a new
+  field has to be added to all of them — one that is missed silently resets to
+  its default on an unrelated edit, exactly like a dropped version number.
 - _Add your project's WHYs here as they emerge._
 
 ## How code quality is enforced (the layer model)
