@@ -52,3 +52,10 @@ from app.exceptions.file import (
     FileUploadFailedError,
     FileParsingFailedError
 )
+from app.exceptions.integration import (
+    IntegrationException,
+    IntegrationNotConfiguredError,
+    IntegrationCredentialError,
+    IntegrationProviderError,
+    TelegramThreadNotFoundError
+)

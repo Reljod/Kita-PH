@@ -22,8 +22,8 @@ load_dotenv(".env.local")
 load_dotenv()
 
 from app.db import db
-from app.routes import chat, memory, agent, llm, auth, user, organization, tool, file, event, rag
-from app.routes.webhook import facebook
+from app.routes import chat, memory, agent, llm, auth, user, organization, tool, file, event, rag, integration
+from app.routes.webhook import facebook, telegram
 from app.security import require_org_membership
 from fastapi import Depends
 from app.services.redis_service import RedisService
@@ -112,6 +112,7 @@ app.include_router(auth.router)
 app.include_router(user.router)
 app.include_router(organization.router)
 app.include_router(facebook.router)
+app.include_router(telegram.router)
 
 # Protected Routers - Require Organization Membership
 protected_deps = [Depends(require_org_membership)]
@@ -123,6 +124,7 @@ app.include_router(tool.router, dependencies=protected_deps)
 app.include_router(file.router, dependencies=protected_deps)
 app.include_router(event.router, dependencies=protected_deps)
 app.include_router(rag.router, dependencies=protected_deps)
+app.include_router(integration.router)
 
 @app.get("/")
 def root():

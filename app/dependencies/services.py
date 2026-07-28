@@ -7,6 +7,7 @@ from app.security import get_current_org_id
 # Interfaces / Classes
 from app.services.event_service import IEventService, HatchetEventService
 from app.services.webhook.facebook_service import FacebookService
+from app.services.webhook.telegram_service import TelegramService
 from app.services.organization_service import OrganizationService
 from app.services.web_search_service import SerperSearchService
 from app.services.llm_service import ILlmService, LlmService
@@ -30,6 +31,7 @@ from app.db import db, TenantCollection
 # --- Singletons ---
 _event_service: Optional[IEventService] = None
 _facebook_service: Optional[FacebookService] = None
+_telegram_service: Optional[TelegramService] = None
 _org_service: Optional[OrganizationService] = None
 _web_search_service: Optional[SerperSearchService] = None
 
@@ -46,6 +48,13 @@ def get_facebook_service() -> FacebookService:
     if _facebook_service is None:
         _facebook_service = FacebookService()
     return _facebook_service
+
+
+def get_telegram_service() -> TelegramService:
+    global _telegram_service
+    if _telegram_service is None:
+        _telegram_service = TelegramService()
+    return _telegram_service
 
 
 def get_org_service() -> OrganizationService:
@@ -71,6 +80,7 @@ class ServiceRegistry:
         # Global singletons
         self.event_service = get_event_service()
         self.facebook_service = get_facebook_service()
+        self.telegram_service = get_telegram_service()
         self.org_service = get_org_service()
         self.web_search_service = get_web_search_service()
 
