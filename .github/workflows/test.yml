@@ -1,9 +1,10 @@
 name: Tests
 
 on:
-  push:
-    branches: [main]
   pull_request:
+  # Called by deploy.yml on push to main, so main is still tested on every
+  # merge — once, as the deploy's own gate, rather than twice in parallel.
+  workflow_call:
 
 jobs:
   unit:

@@ -50,6 +50,14 @@ don't narrate it.
   `401 Invalid x-client-id` proves the database was queried; a slow
   `500 Database error` is what a missing `MONGO_URI` actually looks like.
   → **`deploy-fastapi-cloud`**
+- **CI installs the deploy CLI, not the app.** The build runs on FastAPI
+  Cloud, so a deploy job that syncs the full project spends minutes pulling
+  torch to upload a tarball. `uv sync --only-group dev` is enough.
+  → **`deploy-fastapi-cloud`**
+- **One CI definition of "the tests", called rather than copied.** `test.yml`
+  exposes `workflow_call` and the deploy workflow invokes it, so main is
+  gated by the exact suite that guards every PR — and a merge commit, which
+  no PR check ever ran against, still has to go green before shipping.
 - **Agent versions come from the counter, never from a literal.**
   `create_agent` writing `version=1` while leaving the counter un-seeded put
   two documents at the same `(base_id, version)` and made a pinned

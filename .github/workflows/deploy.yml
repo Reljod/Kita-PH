@@ -1,0 +1,91 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  # Manual re-deploy of whatever is on main, e.g. after fixing an app env var
+  # in the dashboard (a deploy token cannot set those, so a config change needs
+  # a redeploy to take effect).
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One production deploy at a time, and never cancel one mid-flight: the
+# platform promotes whatever finished uploading, so a cancelled run can still
+# end up live. Queue instead.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  # The same suite that guards every PR, reused rather than copied. A merge
+  # commit is not the code that any PR check ran against, so main gets its own
+  # green before anything ships.
+  test:
+    name: Tests
+    uses: ./.github/workflows/test.yml
+
+  deploy:
+    name: FastAPI Cloud
+    needs: test
+    runs-on: ubuntu-latest
+    environment:
+      name: Production – kita-ph
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Resolve the target app
+        env:
+          APP_ID_VAR: ${{ vars.FASTAPI_CLOUD_APP_ID }}
+          APP_ID_SECRET: ${{ secrets.FASTAPI_CLOUD_APP_ID }}
+        run: |
+          # The app UUID is not a credential, so an environment *variable* is
+          # the natural home for it — but accept a secret too, since that is
+          # where `fastapi cloud setup-ci` puts it.
+          app_id="${APP_ID_VAR:-$APP_ID_SECRET}"
+          if [ -z "$app_id" ]; then
+            echo "::error::FASTAPI_CLOUD_APP_ID is not set. Add the app UUID from the FastAPI Cloud dashboard header as a variable (or secret) on the 'Production – kita-ph' environment."
+            exit 1
+          fi
+          echo "FASTAPI_CLOUD_APP_ID=$app_id" >> "$GITHUB_ENV"
+
+      - name: Install the deploy CLI
+        # Only the dev group: the build happens on FastAPI Cloud, so the runner
+        # never needs the app's runtime dependencies (torch alone is gigabytes).
+        run: uv sync --only-group dev
+
+      - name: Deploy
+        env:
+          FASTAPI_CLOUD_TOKEN: ${{ secrets.FASTAPI_CLOUD_TOKEN }}
+        # Invoked as a module because the `fastapi` console script ships with
+        # fastapi[standard] — a runtime dependency this job deliberately skips.
+        # No --no-wait: the command streams the build and exits non-zero when
+        # the build or the promotion fails, which is what makes this job a gate.
+        run: uv run --no-sync python -m fastapi_cloud_cli deploy
+
+      - name: Smoke-check the deployment
+        # Opt-in: set the FASTAPI_CLOUD_APP_URL variable to the app's public URL
+        # to enable it. Worth having because the CLI downgrades a polling
+        # timeout to a warning ("Could not confirm deployment status") and still
+        # exits 0. /openapi.json needs neither auth nor a database, so a 200
+        # there means the new build really booted.
+        if: vars.FASTAPI_CLOUD_APP_URL != ''
+        env:
+          APP_URL: ${{ vars.FASTAPI_CLOUD_APP_URL }}
+        run: |
+          url="${APP_URL%/}/openapi.json"
+          for attempt in 1 2 3 4 5; do
+            code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 "$url" || echo 000)
+            if [ "$code" = "200" ]; then
+              echo "$url -> 200"
+              exit 0
+            fi
+            echo "attempt $attempt: HTTP $code"
+            sleep $((attempt * 10))
+          done
+          echo "::error::$url never returned 200 after the deploy. Check the dashboard logs."
+          exit 1
