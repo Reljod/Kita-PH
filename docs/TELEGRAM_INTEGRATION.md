@@ -210,10 +210,42 @@ TELEGRAM_WEBHOOK_BASE_URL=https://<public-host>   # ngrok tunnel in local dev
 API_KEY_ENCRYPTION_KEY=<fernet key>               # already required
 ```
 
+Both live in Doppler (`kita-api` / `dev`), so the API is started through it:
+
+```
+doppler run -- uv run python main.py
+```
+
+**`TELEGRAM_WEBHOOK_BASE_URL` is read when a bot is connected, not when a
+message arrives.** Connecting bakes the value into the URL handed to
+`setWebhook`, and Telegram keeps delivering there until something re-registers
+it. So a server still holding a stale value from its environment will happily
+register a webhook pointing somewhere the code does not run, and the only
+symptom is silence in the chat — the API sees nothing at all. Ask Telegram what
+it thinks rather than reading local logs:
+
+```
+curl -s "https://api.telegram.org/bot<token>/getWebhookInfo" | jq
+```
+
+`url` is where deliveries are actually going, and `last_error_message` names
+the failure — `404 Not Found` means it is pointed at something without these
+routes. `pending_update_count` is the backlog waiting on a fix.
+
+Because the environment is read at connect time, changing it in Doppler is not
+enough on its own: restart the API before reconnecting, or the old value is
+what gets registered.
+
 ## Local E2E
 
 1. Create a bot with `@BotFather`, keep the token.
-2. `ngrok http 8000`, set `TELEGRAM_WEBHOOK_BASE_URL` to the https URL.
-3. Start the API and the UI; connect the bot on `/integrations`.
-4. Message the bot from a real Telegram account; the reply should arrive in
+2. `ngrok http 8000` and set `TELEGRAM_WEBHOOK_BASE_URL` in Doppler to the
+   https URL it prints. A free ngrok URL changes every restart, so this is a
+   per-session step, not a one-off.
+3. Start the API through `doppler run --` *after* setting it, and start the UI.
+4. Connect the bot on `/integrations`.
+5. Message the bot from a real Telegram account; the reply should arrive in
    Telegram and the thread should appear in `/inbox`.
+
+If step 5 is silent, run `getWebhookInfo` before anything else — it
+distinguishes "never reached us" from "reached us and failed" in one call.
