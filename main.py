@@ -9,7 +9,6 @@ warnings.filterwarnings("ignore", category=DeprecationWarning, module="websocket
 warnings.filterwarnings("ignore", category=DeprecationWarning, module="uvicorn")
 warnings.filterwarnings("ignore", category=DeprecationWarning, module="hatchet_sdk")
 
-import logging
 import logfire
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -22,7 +21,20 @@ load_dotenv(".env.local")
 load_dotenv()
 
 from app.db import db
-from app.routes import chat, memory, agent, llm, auth, user, organization, tool, file, event, rag, integration
+from app.routes import (
+    chat,
+    memory,
+    agent,
+    llm,
+    auth,
+    user,
+    organization,
+    tool,
+    file,
+    event,
+    rag,
+    integration,
+)
 from app.routes.webhook import facebook, telegram
 from app.security import require_org_membership
 from fastapi import Depends
@@ -47,12 +59,13 @@ async def lifespan(app: FastAPI):
     db.close()
     await RedisService.close()
 
+
 app = FastAPI(
-    title="Kita API", 
+    title="Kita API",
     description="LLM Python FastAPI app with pymongo and pydantic-ai",
     version="1.0.0",
     lifespan=lifespan,
-    dependencies=[Depends(get_global_headers)]
+    dependencies=[Depends(get_global_headers)],
 )
 
 log_level_str = os.getenv("LOG_LEVEL", "INFO").upper()
@@ -67,9 +80,9 @@ logfire.configure(
     scrubbing=False,
     console=logfire.ConsoleOptions(
         min_log_level=log_level_str.lower(),
-        span_style='indented',
+        span_style="indented",
         include_timestamps=True,
-    )
+    ),
 )
 logfire.instrument_pydantic_ai()
 logfire.instrument_openai()
@@ -84,11 +97,13 @@ allowed_origins = [
     "http://127.0.0.1:3000",
     "http://localhost:8080",
     "http://127.0.0.1:8080",
-    "https://kita-ph-ui.vercel.app"
+    "https://kita-ph-ui.vercel.app",
 ]
 origins_env = os.environ.get("CORS_ALLOWED_ORIGINS")
 if origins_env:
-    allowed_origins.extend([origin.strip() for origin in origins_env.split(",") if origin.strip()])
+    allowed_origins.extend(
+        [origin.strip() for origin in origins_env.split(",") if origin.strip()]
+    )
 
 app.add_middleware(
     CORSMiddleware,
@@ -104,7 +119,6 @@ app.add_middleware(ApiKeyAuthMiddleware)
 
 # Set up global exception handlers
 setup_error_handlers(app)
-
 
 
 # Include Routers
@@ -126,24 +140,27 @@ app.include_router(event.router, dependencies=protected_deps)
 app.include_router(rag.router, dependencies=protected_deps)
 app.include_router(integration.router)
 
+
 @app.get("/")
 def root():
-    return {
-        "message": "Welcome to Kita API", 
-        "docs_url": "/docs"
-    }
+    return {"message": "Welcome to Kita API", "docs_url": "/docs"}
+
 
 if __name__ == "__main__":
     import uvicorn
+
     port = int(os.environ.get("PORT", 8000))
     log_level_str = os.getenv("LOG_LEVEL", "INFO").upper()
     if log_level_str not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
         log_level_str = "INFO"
-    reload_mode = os.getenv("RELOAD", "false").lower() in ("true", "1", "yes") or log_level_str == "DEBUG"
+    reload_mode = (
+        os.getenv("RELOAD", "false").lower() in ("true", "1", "yes")
+        or log_level_str == "DEBUG"
+    )
     uvicorn.run(
-        "main:app", 
-        host="0.0.0.0", 
-        port=port, 
+        "main:app",
+        host="0.0.0.0",
+        port=port,
         log_level=log_level_str.lower(),
-        reload=reload_mode
+        reload=reload_mode,
     )

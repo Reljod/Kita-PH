@@ -72,6 +72,12 @@ don't narrate it.
   `add_tools` and `remove_tools` each construct a fresh version copy, so a new
   field has to be added to all of them — one that is missed silently resets to
   its default on an unrelated edit, exactly like a dropped version number.
+- **A local lint gate has to match CI's scope, not just its command.**
+  `pre-commit` sees only staged files; CI lints everything the branch
+  touches relative to `main`. A file already clean when it was staged still
+  fails CI, which is how a green local commit produced a red PR. `pre-push`
+  runs the same commands over the same branch-wide diff.
+  → **`setup-git-hooks`**
 - _Add your project's WHYs here as they emerge._
 
 ## How code quality is enforced (the layer model)

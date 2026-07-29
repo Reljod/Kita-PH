@@ -58,6 +58,12 @@ select = ["E4", "E7", "E9", "F"]
 # genuinely cannot all sit at the top of the file.
 "tests/conftest.py" = ["E402"]
 "tests/e2e/conftest.py" = ["E402"]
+# main.py has the same constraint and it is easier to miss: `load_dotenv()`
+# must run before `from app.db import db`, because that module reads MONGO_URI
+# at import time, and GRPC_ENABLE_FORK_SUPPORT must be set before anything
+# pulls in grpc. Hoisting those imports would satisfy the linter and break the
+# application, so this is a false positive rather than debt to pay down.
+"main.py" = ["E402"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
