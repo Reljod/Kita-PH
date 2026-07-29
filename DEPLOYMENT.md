@@ -77,6 +77,47 @@ manual approval before it ships — the workflow needs no changes for that.
 - **Verifies the app actually serves**, when `FASTAPI_CLOUD_APP_URL` is set, by
   polling `/openapi.json` — a route that needs neither auth nor a database, so
   a `200` isolates "the new build booted" from "the database is misconfigured".
+  The probe retries with a widening backoff on purpose: the app can scale to
+  zero, and a cold first request may take tens of seconds before it answers.
+
+### ⏪ Rolling back
+
+There is no "promote the previous deployment" button available to CI — a deploy
+token can only *deploy*. So a rollback is a roll-forward: re-deploy an older
+commit with the same workflow.
+
+`workflow_dispatch` runs a **branch or tag**, never a bare commit SHA, so tag
+the last good commit first. Find it under **Actions → Deploy** — the newest run
+with a green *FastAPI Cloud* job.
+
+```bash
+# 1. Point a tag at the last commit that deployed cleanly.
+git tag rollback-2026-07-28 <good-sha>
+git push origin rollback-2026-07-28
+
+# 2. Ship that ref, then watch it land.
+gh workflow run deploy.yml --ref rollback-2026-07-28
+gh run watch "$(gh run list --workflow=deploy.yml --limit 1 \
+  --json databaseId --jq '.[0].databaseId')"
+```
+
+The same thing from the UI: **Actions → Deploy → Run workflow**, then pick the
+tag from the ref dropdown.
+
+Three things to know before you reach for this:
+
+- **The tag must contain `.github/workflows/deploy.yml`.** GitHub reads the
+  workflow *from the ref you dispatch*, so anything older than the commit that
+  introduced the file cannot be dispatched at all. For those, branch off the old
+  commit and cherry-pick the workflow onto it.
+- **The full test suite runs again** at that old ref, because `deploy` still
+  `needs: test`. That is deliberate — a rollback target that cannot pass its own
+  tests is not a safe place to land — but it means a rollback costs a full CI
+  run, not seconds.
+- **Rolling back the app does not change `main`.** The bad commit is still what
+  `main` points at, so the *next* merge redeploys it. Follow up with a
+  `git revert` PR; the deploy that merge triggers is what makes the rollback
+  permanent.
 
 Manual and local deploys are unchanged: see `.agents/skills/deploy-fastapi-cloud`.
 
