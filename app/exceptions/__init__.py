@@ -6,26 +6,26 @@ from app.exceptions.base import (
     ToolException,
     RagException,
     MemoryException,
-    FileException
+    FileException,
 )
 from app.exceptions.system import (
     KitaDatabaseError,
     KitaRedisError,
     KitaValidationError,
-    SystemConfigurationError
+    SystemConfigurationError,
 )
 from app.exceptions.auth import (
     UnauthorizedError,
     ForbiddenError,
     InvalidApiKeyOrClientError,
-    AuthSessionExpiredError
+    AuthSessionExpiredError,
 )
 from app.exceptions.agent import (
     AgentNotFoundError,
     AgentVersionNotFoundError,
     AgentRunFailedError,
     AgentRunStreamFailedError,
-    ChatNotFoundError
+    ChatNotFoundError,
 )
 from app.exceptions.tool import (
     ToolNotFoundError,
@@ -37,18 +37,68 @@ from app.exceptions.tool import (
     ToolLlmError,
     ToolMemoryError,
     ToolParseError,
-    ToolWebSearchError
+    ToolWebSearchError,
 )
-from app.exceptions.rag import (
-    RagQueryFailedError,
-    RagEnrichmentFailedError
-)
-from app.exceptions.memory import (
-    MemoryNotFoundError,
-    MemoryOperationFailedError
-)
+from app.exceptions.rag import RagQueryFailedError, RagEnrichmentFailedError
+from app.exceptions.memory import MemoryNotFoundError, MemoryOperationFailedError
 from app.exceptions.file import (
     KitaFileNotFoundError,
     FileUploadFailedError,
-    FileParsingFailedError
+    FileParsingFailedError,
 )
+from app.exceptions.integration import (
+    IntegrationException,
+    IntegrationNotConfiguredError,
+    IntegrationCredentialError,
+    IntegrationProviderError,
+    TelegramThreadNotFoundError,
+)
+
+# This module exists purely to re-export the exception hierarchy, which
+# ruff otherwise reads as unused imports. Naming them here states the intent
+# and keeps the lint gate meaningful for anyone editing this file.
+__all__ = [
+    "KitaException",
+    "SystemException",
+    "AuthException",
+    "AgentException",
+    "ToolException",
+    "RagException",
+    "MemoryException",
+    "FileException",
+    "KitaDatabaseError",
+    "KitaRedisError",
+    "KitaValidationError",
+    "SystemConfigurationError",
+    "UnauthorizedError",
+    "ForbiddenError",
+    "InvalidApiKeyOrClientError",
+    "AuthSessionExpiredError",
+    "AgentNotFoundError",
+    "AgentVersionNotFoundError",
+    "AgentRunFailedError",
+    "AgentRunStreamFailedError",
+    "ChatNotFoundError",
+    "ToolNotFoundError",
+    "ToolRegistrationError",
+    "ToolAgentCreationError",
+    "ToolDelegationError",
+    "ToolFileError",
+    "ToolGraphRagError",
+    "ToolLlmError",
+    "ToolMemoryError",
+    "ToolParseError",
+    "ToolWebSearchError",
+    "RagQueryFailedError",
+    "RagEnrichmentFailedError",
+    "MemoryNotFoundError",
+    "MemoryOperationFailedError",
+    "KitaFileNotFoundError",
+    "FileUploadFailedError",
+    "FileParsingFailedError",
+    "IntegrationException",
+    "IntegrationNotConfiguredError",
+    "IntegrationCredentialError",
+    "IntegrationProviderError",
+    "TelegramThreadNotFoundError",
+]

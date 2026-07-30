@@ -64,6 +64,18 @@ class Database:
     def get_file_parsed_flattened_collection(cls) -> Collection:
         return cls.db["file_parsed_flattened"]
 
+    @classmethod
+    def get_telegram_integrations_collection(cls) -> Collection:
+        return cls.db["telegram_integrations"]
+
+    @classmethod
+    def get_telegram_threads_collection(cls) -> Collection:
+        return cls.db["telegram_threads"]
+
+    @classmethod
+    def get_telegram_messages_collection(cls) -> Collection:
+        return cls.db["telegram_messages"]
+
 
 db = Database()
 

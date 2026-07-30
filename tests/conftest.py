@@ -36,6 +36,7 @@ _TEST_ENV = {
     "NEO4J_PASSWORD": "test-password",
     "FACEBOOK_APP_SECRET": "test-fb-secret",
     "FACEBOOK_VERIFY_TOKEN": "test-fb-verify-token",
+    "TELEGRAM_WEBHOOK_BASE_URL": "https://kita.test",
     "CORS_ALLOWED_ORIGINS": "http://localhost:3000",
     "HATCHET_CLIENT_TOKEN": "",
     "LOGFIRE_TOKEN": "",
